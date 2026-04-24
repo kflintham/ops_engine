@@ -83,14 +83,11 @@ Brightpearl. Not yet fleshed out; will be done as part of Stage 6.
 | `Carrier` + `Consignment Reference` + `Consignment Tracking Url` | Reference data | **TBD** — stored on the order as a note, custom field, or Brightpearl shipment? |
 | `Sku`, `Description`, `Colour`, `Size`, `Quantity` | Verification only | Compared against what we sent; no write-back |
 
-## Inbound field mapping (stock feed → Brightpearl)
+## Stock feed — out of scope
 
-Flow C (stock feed). Also Stage 5, not yet fleshed out.
-
-| GB CSV column | Used for | Brightpearl target |
-| --- | --- | --- |
-| `SupplierSkuReference` | Lookup | Brightpearl product whose Gardiners supplier-SKU matches |
-| `TradeStock` | Stock level | **TBD** — which Brightpearl warehouse / stock field do we update? Likely a virtual "Gardiners JIT available" warehouse rather than our physical one. |
+Gardiners' stock feed is already handled by a separate existing WBYS feed.
+This integration does not consume it. See
+[`README.md`](README.md#flow-c--stock-feed-in-gardiners--wbys--out-of-scope).
 
 ## What to verify before writing code
 

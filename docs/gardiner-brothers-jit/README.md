@@ -19,9 +19,10 @@ building it ourselves so we own it and can extend it.
 Same supplier, same SFTP server, but a **different folder tree and different
 file format** from DF. This folder documents the JIT format only.
 
-## The three file flows
+## The file flows
 
-All three run over SFTP. The SFTP server is owned by WBYS (not BSITC):
+Two flows are in scope for this integration. Both run over SFTP. The SFTP
+server is owned by WBYS (not BSITC):
 `sftp://ec2-63-32-88-8.eu-west-1.compute.amazonaws.com`.
 
 ```
@@ -36,12 +37,11 @@ All three run over SFTP. The SFTP server is owned by WBYS (not BSITC):
   Brightpearl  ◀──────┤                                       │
   order status        │                                       ▼
   updated      ◀─ CSV ─── /JIT/Notifications/  ◀── drops file per status change
-                      │
-                      │
-  Brightpearl  ◀──────┤
-  stock levels        │
-  updated      ◀─ CSV ─── /JIT/Stock/           ◀── drops full feed every 30 min
 ```
+
+A third flow (supplier stock feed) is offered by Gardiners but is **out of
+scope** for this integration — WBYS already gets Gardiners stock levels
+through a separate existing feed. See Flow C below.
 
 Folder paths are provisional — final structure to be agreed with Sam.
 
@@ -81,19 +81,17 @@ Folder paths are provisional — final structure to be agreed with Sam.
   - `Customer Line Reference` = our `Order Line Reference` (= Brightpearl order
     line ID we sent in Flow A)
 
-### Flow C — Stock feed in (Gardiners ▶ WBYS)
+### Flow C — Stock feed in (Gardiners ▶ WBYS) — **OUT OF SCOPE**
 
-- **They write:** one full stock file every 30 minutes.
-- **Location:** `/JIT/Stock/` on our SFTP.
-- **Format:** see [`process-docs/stock-feed-processing.pdf`](process-docs/stock-feed-processing.pdf).
-- **Samples:** [`samples/stock-feed-sku.csv`](samples/stock-feed-sku.csv) (by SKU) and
-  [`samples/stock-feed-barcode.csv`](samples/stock-feed-barcode.csv) (by barcode) — **we will use
-  one, not both.** Default choice: **SKU**, since Brightpearl's supplier
-  product reference for Gardiners lines is the Gardiners SKU.
-- **Important behaviour:** when Gardiners drop a product, its `TradeStock` is
-  first reported as `0`, then the line disappears from subsequent feeds. Our
-  importer must therefore **not** preserve last-known quantity when a SKU
-  drops out — we should treat "absent from feed" as "zero / unavailable".
+WBYS already receives Gardiners stock levels via a separate feed. This
+integration therefore does **not** handle the Gardiners stock feed. Samples
+and the process PDF are retained in this folder for reference only, in case
+we consolidate feeds later.
+
+Files kept for reference:
+[`samples/stock-feed-sku.csv`](samples/stock-feed-sku.csv),
+[`samples/stock-feed-barcode.csv`](samples/stock-feed-barcode.csv),
+[`process-docs/stock-feed-processing.pdf`](process-docs/stock-feed-processing.pdf).
 
 ### Invoices
 
@@ -148,14 +146,14 @@ Before we build, Usamah / Katie need to confirm with Sam:
 
 ## Build stages
 
-Tracked at the repo root — this folder is spec only.
-
 1. ✅ Documentation committed (this folder).
-2. ⏳ Field-mapping table drafted (see [`field-mapping.md`](field-mapping.md)).
-3. ⬜ Core SFTP + Brightpearl helpers.
-4. ⬜ Outbound order CSV generator (manual trigger first).
-5. ⬜ Inbound stock feed importer.
-6. ⬜ Inbound notification importer.
-7. ⬜ Automated trigger from Brightpearl status change.
-8. ⬜ Config-driven generalisation so other integrations can be added.
-9. ⬜ Admin UI over configs + audit log.
+2. ✅ Field-mapping table drafted (see [`field-mapping.md`](field-mapping.md)).
+3. ✅ Outbound order CSV builder + tests.
+4. ⬜ Inbound notification CSV parser + tests.
+5. ⬜ Core SFTP client.
+6. ⬜ Core Brightpearl API client.
+7. ⬜ Wire outbound: fetch Brightpearl order → build CSV → SFTP upload.
+8. ⬜ Wire inbound: SFTP poll notifications → parse → update Brightpearl.
+9. ⬜ Automated trigger from Brightpearl status change.
+10. ⬜ Config-driven generalisation so other integrations can be added.
+11. ⬜ Admin UI over configs + audit log.
