@@ -134,26 +134,40 @@ Before we build, Usamah / Katie need to confirm with Sam:
 
 ## Open questions for WBYS internal
 
-1. **Brightpearl trigger.** Which order status change means "send this to
-   Gardiners JIT"? (BSITC is using some status — need to find out which, so
-   we can replicate or rename.)
-2. **Brightpearl API credentials.** Do we have our own API app credentials,
-   or does everything go through BSITC today?
-3. **How do JIT items get flagged in Brightpearl today?** A supplier tag? A
-   custom field? A specific warehouse?
-4. **Who monitors failures?** Need an alerting target (email list / Slack
+1. ✅ **Brightpearl trigger.** Purchase orders with status
+   `GBR JIT - Request Sent` are picked up by the app. See
+   [`field-mapping.md`](field-mapping.md#brightpearl-purchase-order-status-workflow)
+   for the full status workflow.
+2. ✅ **Brightpearl API credentials.** WBYS has its own API app credentials
+   (not via BSITC). Runtime values live in `.env.local`; see `.env.example`
+   at the repo root.
+3. **How do JIT items get flagged in Brightpearl today?** Resolved in part by
+   the status workflow above, but we still need to confirm the supplier tag /
+   account number / custom field that identifies a line as a Gardiners JIT
+   line (vs. dropship). Needed by the outbound fetch step.
+4. **Where does the Gardiners SKU live on a Brightpearl product?** Still
+   open. Next step is a probe script against the live Brightpearl account.
+5. **Who monitors failures?** Need an alerting target (email list / Slack
    channel) for when a file can't be sent or a notification can't be applied.
+6. **Cosmetic cleanups.** Two to consider before go-live:
+   - Fix the typo in the `GBR JIT - Invoice Recieved` status name.
+   - Consider renaming `GBR JIT - Order Fulfilled` to
+     `GBR JIT - Fully Despatched` to distinguish it from customer-side
+     fulfilment.
 
 ## Build stages
 
 1. ✅ Documentation committed (this folder).
 2. ✅ Field-mapping table drafted (see [`field-mapping.md`](field-mapping.md)).
 3. ✅ Outbound order CSV builder + tests.
-4. ⬜ Inbound notification CSV parser + tests.
-5. ⬜ Core SFTP client.
-6. ⬜ Core Brightpearl API client.
-7. ⬜ Wire outbound: fetch Brightpearl order → build CSV → SFTP upload.
-8. ⬜ Wire inbound: SFTP poll notifications → parse → update Brightpearl.
-9. ⬜ Automated trigger from Brightpearl status change.
-10. ⬜ Config-driven generalisation so other integrations can be added.
-11. ⬜ Admin UI over configs + audit log.
+4. ✅ Inbound notification CSV parser + tests.
+5. ✅ Core Brightpearl API client.
+6. ⬜ Core SFTP client.
+7. ⬜ Probe script: fetch a sample Gardiners PO and product, resolve the
+   Gardiners SKU field.
+8. ⬜ Wire outbound: fetch Brightpearl PO → build CSV → SFTP upload →
+   transition PO to `GBR JIT - Pending`.
+9. ⬜ Wire inbound: SFTP poll notifications → parse → transition PO status.
+10. ⬜ Automated trigger (poll or webhook) for PO status changes.
+11. ⬜ Config-driven generalisation so other integrations can be added.
+12. ⬜ Admin UI over configs + audit log.

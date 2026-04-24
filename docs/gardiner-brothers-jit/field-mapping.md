@@ -68,20 +68,55 @@ These live in the integration's config and never come from Brightpearl:
 - `sftp.stock_path` = `/JIT/Stock/` *(to confirm with Sam)*
 - `file_name_template` — e.g. `{order_reference}-{yyyymmddHHMM}.csv`.
 
-## Inbound field mapping (notifications → Brightpearl)
+## Brightpearl purchase-order status workflow
 
-For completeness — this is how Flow B (notifications) maps back into
-Brightpearl. Not yet fleshed out; will be done as part of Stage 6.
+WBYS have set up the following custom statuses on Brightpearl purchase
+orders for the GBR JIT integration. The app drives transitions between
+them based on what it sends and what Gardiners sends back.
 
-| GB CSV column | Used for | Brightpearl target |
+| Status | Set by | Meaning / trigger |
 | --- | --- | --- |
-| `Customer Header Reference` | Locating the order | lookup into `BP:order` by the `Order Reference` we sent in Flow A |
-| `Customer Line Reference` | Locating the order line | lookup into `BP:orderRow.id` (parsed out of our `{orderId}-{rowId}` format) |
-| `Current Status` → `Received` | Status update | **TBD** — probably "Acknowledged by supplier" custom status |
-| `Current Status` → `Cancelled` | Status update + trigger reorder flow | **TBD** — probably cancel the PO / flag for re-sourcing |
-| `Current Status` → `Despatched` | Status update | **TBD** — probably "Shipped by supplier"; warehouse receives the goods next day |
-| `Carrier` + `Consignment Reference` + `Consignment Tracking Url` | Reference data | **TBD** — stored on the order as a note, custom field, or Brightpearl shipment? |
-| `Sku`, `Description`, `Colour`, `Size`, `Quantity` | Verification only | Compared against what we sent; no write-back |
+| `GBR JIT - Request Sent` | **Human (Purchasing)** | Buyer has staged the PO in Brightpearl and wants it sent to Gardiners. This is the **app's trigger to pick it up**. |
+| `GBR JIT - Pending` | App (after outbound) | App has uploaded the order CSV to SFTP; waiting to hear back. |
+| `GBR JIT - Partially Acknowledged` | App (from notification) | At least one order line has a `Received` notification from Gardiners but not all. |
+| `GBR JIT - Acknowledged` | App (from notification) | All order lines have been `Received` by Gardiners. |
+| `GBR JIT - Partially Dispatched` | App (from notification) | At least one order line has a `Despatched` notification from Gardiners but not all. |
+| `GBR JIT - Order Fulfilled` | App (from notification) | All order lines despatched from Gardiners. ⚠️ Name is ambiguous with customer-side fulfilment — consider renaming to `GBR JIT - Fully Despatched`. |
+| `GBR JIT - Invoice Recieved` | **Human (Finance)** | Set manually once Gardiners' invoice has been processed. ⚠️ Typo in the status name (`Recieved` → `Received`). |
+| `GBR JIT - Cancelled` | App (from notification) | Gardiners returned a `CAN` / `COS` / `CBP` notification, or Purchasing cancelled manually. |
+
+### Outbound trigger
+
+The app polls (or receives a webhook) for Brightpearl purchase orders
+whose status is `GBR JIT - Request Sent`. For each such PO:
+
+1. Fetch the PO and its lines from Brightpearl.
+2. Build the order CSV (see `order_builder.py`).
+3. Upload to the Gardiners SFTP orders folder.
+4. Move the PO's status to `GBR JIT - Pending`.
+5. Log the file name and timestamp against the PO (note or custom field, TBD).
+
+If any step fails, the PO stays on `GBR JIT - Request Sent` so the next
+run picks it up again; the failure is alerted out.
+
+### Inbound field mapping (notifications → Brightpearl)
+
+Flow B notifications drive status transitions and attach shipment data.
+
+| GB CSV column | Used for | Brightpearl action |
+| --- | --- | --- |
+| `Customer Header Reference` | Locating the PO | match against the `Order Reference` we sent in Flow A (typically the Brightpearl PO ID) |
+| `Customer Line Reference` | Locating the PO line | match against the `orderRow.id` we sent in Flow A |
+| `Current Status` → `Received` / `Recieved` | Status transition | if all lines of the PO are now Received, set PO status to `GBR JIT - Acknowledged`; otherwise `GBR JIT - Partially Acknowledged` |
+| `Current Status` → `Despatched` | Status transition | if all lines of the PO are now Despatched, set PO status to `GBR JIT - Order Fulfilled`; otherwise `GBR JIT - Partially Dispatched` |
+| `Current Status` → `Cancelled` | Status transition | set PO status to `GBR JIT - Cancelled` |
+| `Carrier` + `Consignment Reference` + `Consignment Tracking Url` | Shipment data | attach to the PO. **TBD:** note, custom field, or Brightpearl shipment record? |
+| `Sku`, `Description`, `Colour`, `Size`, `Quantity` | Verification only | log a warning if Gardiners report a different SKU/quantity than we sent; do not overwrite |
+
+The per-line "all lines received / despatched" check requires the app to
+read the PO from Brightpearl first and track which lines have already
+hit which state — it cannot be decided from a single notification file
+alone.
 
 ## Stock feed — out of scope
 
