@@ -141,11 +141,13 @@ Before we build, Usamah / Katie need to confirm with Sam:
 2. ✅ **Brightpearl API credentials.** WBYS has its own API app credentials
    (not via BSITC). Runtime values live in `.env.local`; see `.env.example`
    at the repo root.
-3. **How do JIT items get flagged in Brightpearl today?** Resolved in part by
-   the status workflow above. Still to confirm: whether the `GBR JIT`
-   statuses are only ever applied to purchase orders raised against the
-   Gardiners supplier account (so status alone is sufficient to identify a
-   JIT PO), or whether we also need to filter by supplier.
+3. ✅ **How do JIT items get flagged in Brightpearl today?** Resolved:
+   Gardiners have two supplier accounts in Brightpearl — `B1358` (JIT) and
+   `B3116 DF` (dropship). A product is JIT-eligible iff it lists `B1358`
+   among its suppliers; a PO is a JIT PO iff it's raised against `B1358`.
+   See the
+   [JIT eligibility rule](field-mapping.md#jit-eligibility-rule) for the
+   full rule.
 4. ✅ **Where does the Gardiners SKU live on a Brightpearl product?**
    Resolved: it's the `SKU` field on the product's entry in the
    `Cost Price GBR (Net)` price list (Prices tab in the UI). This is

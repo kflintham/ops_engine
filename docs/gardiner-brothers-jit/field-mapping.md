@@ -45,7 +45,7 @@ build.
 
 | GB CSV column | GB requirement | Source | Brightpearl API reference | Notes / open questions |
 | --- | --- | --- | --- | --- |
-| `SKU` | **One of `SKU` or `Barcode` required; SKU preferred** | `BP:product_price.sku` for the `Cost Price GBR (Net)` price list | `GET /product-price-service/product-price/{productId}` → entry where `priceListId == config.gardiners_price_list_id` → `sku` field *(verify exact endpoint/field name at implementation time)* | **Rule (from WBYS):** some products are sourced from more than one supplier, so we **must not** use `BP:product.SKU` (that's the internal WBYS SKU). Always resolve the Gardiners SKU from the per-product, per-price-list SKU field that Brightpearl exposes on the Prices tab (labelled *"Optional supplier or customer-specific product code"*). If the line's product has no entry for the Gardiners price list, or the entry has no SKU, the order must fail validation before upload. |
+| `SKU` | **One of `SKU` or `Barcode` required; SKU preferred** | `BP:product_price.sku` for the `Cost Price GBR (Net)` price list | `GET /product-price-service/product-price/{productId}` → entry where `priceListId == config.gardiners_price_list_id` → `sku` field *(verify exact endpoint/field name at implementation time)* | **Rule (from WBYS):** some products are sourced from more than one supplier, so we **must not** use `BP:product.SKU` (that's the internal WBYS SKU). Always resolve the Gardiners SKU from the per-product, per-price-list SKU field that Brightpearl exposes on the Prices tab (labelled *"Optional supplier or customer-specific product code"*). **Before even attempting this lookup**, verify that the line's product lists `Gardiner Bros & Co (B1358)` (the JIT account) among its suppliers — see the JIT-eligibility rule below. If the product has no entry for the Gardiners price list, or the entry has no SKU, the order must fail validation before upload. |
 | `Barcode` | Fallback if SKU unavailable | `BP:product.barcode` | `GET /product-service/product/{productId}` → `barcode` | Given the rule above, barcode fallback should effectively never be needed. Keep the option open for data-quality issues but log a warning whenever we fall back. |
 | `Customer SKU` | Not required | `blank` | n/a | "Used for bespoke integrations" — not ours. |
 | `Quantity` | **Required — integer** | `BP:orderRow.quantity` | `GET /order-service/order/{id}` → `orderRows[].productQuantity.magnitude` | Must be integer. If Brightpearl ever allows fractional quantities on these products, we'll need a guard. |
@@ -56,6 +56,12 @@ build.
 
 These live in the integration's config and never come from Brightpearl:
 
+- `gardiners_jit_supplier_contact_id` — the Brightpearl contact ID of the
+  `Gardiner Bros & Co (B1358)` supplier account. This is the **JIT** account;
+  the separate `Gardiner Bros & Co (B3116) DF` account is dropship and is
+  **not** used by this integration. Used as the supplier filter when
+  searching for POs to send, and to validate that every line on a GBR JIT PO
+  points at a product that lists B1358 as one of its suppliers.
 - `gardiners_price_list_id` — the Brightpearl ID of the `Cost Price GBR (Net)`
   price list. Every order line looks up its Gardiners SKU from this price
   list's `sku` field. **To capture:** one-off API call to list price lists,
@@ -73,6 +79,33 @@ These live in the integration's config and never come from Brightpearl:
 - `po_status_ids` — Brightpearl IDs for the eight custom statuses listed in
   [the status workflow](#brightpearl-purchase-order-status-workflow). These
   can be looked up once via the order-service API.
+
+## JIT eligibility rule
+
+Not every Gardiners product is eligible for JIT. Gardiners operate two
+separate supplier accounts in Brightpearl:
+
+| Supplier account | Brightpearl label | Used for |
+| --- | --- | --- |
+| `B1358` | `Gardiner Bros & Co (B1358)` | **JIT / wholesale** (this integration) |
+| `B3116` | `Gardiner Bros & Co (B3116) DF` | Dropship (separate flow, not this integration) |
+
+A product is eligible for a JIT order **if and only if** `B1358` is one of
+the suppliers selected on its Suppliers tab. `B3116 DF` being selected is
+not sufficient — those products can only be dropshipped. A product may have
+both accounts selected, in which case it is eligible for either flow; the
+**primary** supplier on the product does not matter for eligibility.
+
+Consequences for the outbound pipeline:
+
+1. The PO filter should restrict to POs raised against supplier `B1358`,
+   not just to POs with status `GBR JIT - Request Sent` — even if the
+   statuses are only supposed to be applied to JIT POs today, the supplier
+   filter is the authoritative check.
+2. When building each CSV line, verify that the line's product lists
+   `B1358` among its suppliers. Raise an error (and leave the PO on
+   `GBR JIT - Request Sent` for alerting) if any line fails this check,
+   rather than silently sending an order Gardiners JIT can't fulfil.
 
 ## Brightpearl purchase-order status workflow
 
@@ -142,9 +175,10 @@ account and a real test order as part of the outbound-pipeline work:
    we need to fall back to `order.id`.
 3. Whether `orderRows[].id` is a stable unique identifier across the life of
    the order (it should be, but verify).
-4. Whether JIT purchase orders can be filtered by status alone, or whether
-   we also need a supplier-account filter to distinguish GBR JIT POs from
-   any other POs that might reuse the same statuses.
+4. ✅ **JIT identification rule.** Resolved: filter POs by supplier
+   account `B1358` (`Gardiner Bros & Co (B1358)`), not by status alone.
+   `B3116 DF` is dropship and out of scope for this integration. See the
+   [JIT eligibility rule](#jit-eligibility-rule) section above.
 5. Whether Brightpearl issues a webhook on purchase-order status changes,
    or whether we have to poll `order-search`.
 6. Exact API endpoint and response shape for price-list SKUs, since the
