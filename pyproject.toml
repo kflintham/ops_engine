@@ -5,6 +5,7 @@ description = "WBYS integration platform: Brightpearl <-> suppliers via SFTP."
 requires-python = ">=3.11"
 dependencies = [
     "requests>=2.31",
+    "paramiko>=3.4",
 ]
 
 [project.optional-dependencies]
