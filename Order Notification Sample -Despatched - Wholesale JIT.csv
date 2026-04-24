@@ -1,0 +1,3 @@
+Customer Header Reference,Customer Line Reference,Sku,Description,Colour,Size,Quantity,Carrier,Consignment Status,Consignment Reference,Consignment Tracking Url,Current Status
+Test002,12346-1,34233-58447-07,Good Bungee 2.0,Grey,7,1,DPD,DES,123456789,https://www.dpd.co.uk/apps/tracking/?reference=123456789,Despatched
+Test002,12346-2,24840-41090-04,Arctic Sport II Tall,Black,6,1,DPD,DES,123456789,https://www.dpd.co.uk/apps/tracking/?reference=123456789,Despatched
