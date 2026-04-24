@@ -142,11 +142,17 @@ Before we build, Usamah / Katie need to confirm with Sam:
    (not via BSITC). Runtime values live in `.env.local`; see `.env.example`
    at the repo root.
 3. **How do JIT items get flagged in Brightpearl today?** Resolved in part by
-   the status workflow above, but we still need to confirm the supplier tag /
-   account number / custom field that identifies a line as a Gardiners JIT
-   line (vs. dropship). Needed by the outbound fetch step.
-4. **Where does the Gardiners SKU live on a Brightpearl product?** Still
-   open. Next step is a probe script against the live Brightpearl account.
+   the status workflow above. Still to confirm: whether the `GBR JIT`
+   statuses are only ever applied to purchase orders raised against the
+   Gardiners supplier account (so status alone is sufficient to identify a
+   JIT PO), or whether we also need to filter by supplier.
+4. ✅ **Where does the Gardiners SKU live on a Brightpearl product?**
+   Resolved: it's the `SKU` field on the product's entry in the
+   `Cost Price GBR (Net)` price list (Prices tab in the UI). This is
+   required because some products are sourced from more than one supplier,
+   so the top-level `product.SKU` cannot be used. See
+   [`field-mapping.md`](field-mapping.md#line-level-fields-one-row-per-brightpearl-order-line)
+   for the full rule.
 5. **Who monitors failures?** Need an alerting target (email list / Slack
    channel) for when a file can't be sent or a notification can't be applied.
 6. **Cosmetic cleanups.** Two to consider before go-live:

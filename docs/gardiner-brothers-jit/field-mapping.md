@@ -45,8 +45,8 @@ build.
 
 | GB CSV column | GB requirement | Source | Brightpearl API reference | Notes / open questions |
 | --- | --- | --- | --- | --- |
-| `SKU` | **One of `SKU` or `Barcode` required; SKU preferred** | `BP:product.SKU` *(the Gardiners SKU)* | `GET /product-service/product/{productId}` → `SKU` **or** the supplier product code custom field | **Needs investigation.** Brightpearl's `product.SKU` may be our internal SKU, not Gardiners'. The Gardiners SKU is usually stored as a supplier product code on the product's supplier linkage, or as a custom field. We must resolve **which Brightpearl field holds the Gardiners SKU** before we can generate the file. |
-| `Barcode` | Fallback if SKU unavailable | `BP:product.barcode` | `GET /product-service/product/{productId}` → `barcode` | Only used if we can't get the Gardiners SKU. Gardiners' product data CSV shows these are standard UPC/EAN. |
+| `SKU` | **One of `SKU` or `Barcode` required; SKU preferred** | `BP:product_price.sku` for the `Cost Price GBR (Net)` price list | `GET /product-price-service/product-price/{productId}` → entry where `priceListId == config.gardiners_price_list_id` → `sku` field *(verify exact endpoint/field name at implementation time)* | **Rule (from WBYS):** some products are sourced from more than one supplier, so we **must not** use `BP:product.SKU` (that's the internal WBYS SKU). Always resolve the Gardiners SKU from the per-product, per-price-list SKU field that Brightpearl exposes on the Prices tab (labelled *"Optional supplier or customer-specific product code"*). If the line's product has no entry for the Gardiners price list, or the entry has no SKU, the order must fail validation before upload. |
+| `Barcode` | Fallback if SKU unavailable | `BP:product.barcode` | `GET /product-service/product/{productId}` → `barcode` | Given the rule above, barcode fallback should effectively never be needed. Keep the option open for data-quality issues but log a warning whenever we fall back. |
 | `Customer SKU` | Not required | `blank` | n/a | "Used for bespoke integrations" — not ours. |
 | `Quantity` | **Required — integer** | `BP:orderRow.quantity` | `GET /order-service/order/{id}` → `orderRows[].productQuantity.magnitude` | Must be integer. If Brightpearl ever allows fractional quantities on these products, we'll need a guard. |
 | `Order Line Reference` | **Preferred** — text or numeric | `derived: f"{BP:order.id}-{BP:orderRow.id}"` (provisional) | `GET /order-service/order/{id}` → `orderRows[].id` | Must be **unique across all lines ever sent** and **stable** — we match on it in notifications (`Customer Line Reference`). Using `{orderId}-{rowId}` is unique, human-readable, and survives restatement. Confirm with Sam that hyphen is allowed. |
@@ -56,6 +56,10 @@ build.
 
 These live in the integration's config and never come from Brightpearl:
 
+- `gardiners_price_list_id` — the Brightpearl ID of the `Cost Price GBR (Net)`
+  price list. Every order line looks up its Gardiners SKU from this price
+  list's `sku` field. **To capture:** one-off API call to list price lists,
+  grab the ID for "Cost Price GBR (Net)".
 - `customer_id` — Gardiners account number for WBYS. **Ask Usamah.**
 - `delivery_address.*` — WBYS warehouse address. **Ask Operations for the
   exact delivery address to use.**
@@ -65,8 +69,10 @@ These live in the integration's config and never come from Brightpearl:
 - `sftp.host` = `ec2-63-32-88-8.eu-west-1.compute.amazonaws.com`
 - `sftp.orders_path` = `/JIT/Orders/` *(to confirm with Sam)*
 - `sftp.notifications_path` = `/JIT/Notifications/` *(to confirm with Sam)*
-- `sftp.stock_path` = `/JIT/Stock/` *(to confirm with Sam)*
 - `file_name_template` — e.g. `{order_reference}-{yyyymmddHHMM}.csv`.
+- `po_status_ids` — Brightpearl IDs for the eight custom statuses listed in
+  [the status workflow](#brightpearl-purchase-order-status-workflow). These
+  can be looked up once via the order-service API.
 
 ## Brightpearl purchase-order status workflow
 
@@ -126,16 +132,20 @@ This integration does not consume it. See
 
 ## What to verify before writing code
 
-The following assumptions in this document must be validated against the live
-Brightpearl account and a real test order **before** we start Stage 3 (core
-helpers):
+The following assumptions must be validated against the live Brightpearl
+account and a real test order as part of the outbound-pipeline work:
 
-1. Which Brightpearl field holds the Gardiners SKU (not our internal SKU).
-2. Whether `order.reference` is always set, or whether we need to fall back
-   to `order.id`.
+1. ✅ **Gardiners SKU location.** Resolved: it's the `sku` field on the
+   product's entry in the `Cost Price GBR (Net)` price list (Prices tab in
+   the UI). See the line-level `SKU` row in the mapping table above.
+2. Whether `order.reference` is always set for purchase orders, or whether
+   we need to fall back to `order.id`.
 3. Whether `orderRows[].id` is a stable unique identifier across the life of
    the order (it should be, but verify).
-4. Whether JIT orders can be identified in Brightpearl by status alone, or
-   whether they also need a supplier / warehouse / custom-field filter.
-5. Whether Brightpearl issues a webhook on the relevant status change, or
-   whether we have to poll.
+4. Whether JIT purchase orders can be filtered by status alone, or whether
+   we also need a supplier-account filter to distinguish GBR JIT POs from
+   any other POs that might reuse the same statuses.
+5. Whether Brightpearl issues a webhook on purchase-order status changes,
+   or whether we have to poll `order-search`.
+6. Exact API endpoint and response shape for price-list SKUs, since the
+   mapping table above flags this as "verify at implementation time".
