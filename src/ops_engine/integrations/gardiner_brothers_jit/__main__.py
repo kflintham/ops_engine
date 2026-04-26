@@ -76,6 +76,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     p_dump.set_defaults(func=_cmd_dump)
 
+    p_dump_path = sub.add_parser(
+        "dump-path",
+        help="Dump raw JSON from an arbitrary Brightpearl path (for debugging)",
+    )
+    p_dump_path.add_argument(
+        "path",
+        help="Brightpearl path, e.g. /product-service/product/53095",
+    )
+    p_dump_path.set_defaults(func=_cmd_dump_path)
+
     p_list_sftp = sub.add_parser(
         "list-sftp",
         help="List files in an SFTP directory (for debugging)",
@@ -122,6 +132,19 @@ def _cmd_dump(_args: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001 -- this is a diagnostics tool
             sys.stdout.write(f"ERROR: {type(exc).__name__}: {exc}")
         sys.stdout.write("\n")
+    return 0
+
+
+def _cmd_dump_path(args: argparse.Namespace) -> int:
+    bp_cfg = BrightpearlConfig.from_env()
+    bp = BrightpearlClient(bp_cfg)
+    sys.stdout.write(f"\n=== GET {args.path} ===\n")
+    try:
+        response = bp.get(args.path)
+        sys.stdout.write(json.dumps(response, indent=2, default=str))
+    except Exception as exc:  # noqa: BLE001 -- diagnostics tool
+        sys.stdout.write(f"ERROR: {type(exc).__name__}: {exc}")
+    sys.stdout.write("\n")
     return 0
 
 
