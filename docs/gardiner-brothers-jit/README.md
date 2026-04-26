@@ -9,6 +9,10 @@ Gardiners listing JIT items to order.
 (dropship) orders via SFTP via BSITC — we're doing the same for JIT but
 building it ourselves so we own it and can extend it.
 
+> **Running this for the first time?** See [`runbook.md`](runbook.md) for
+> step-by-step setup (clone, configure, discover IDs, create SFTP folders,
+> send a test PO).
+
 ## What "JIT" means here
 
 - **Dropship (DF):** Gardiners ship direct to the end customer from their
