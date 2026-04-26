@@ -169,6 +169,23 @@ def test_4xx_raises_brightpearl_error_with_body(config: BrightpearlConfig) -> No
 
     assert excinfo.value.status == 404
     assert excinfo.value.body == {"errors": [{"message": "Order not found"}]}
+    # The error message must include the body so operators can debug.
+    assert "Order not found" in str(excinfo.value)
+
+
+def test_brightpearl_error_truncates_very_long_bodies(
+    config: BrightpearlConfig,
+) -> None:
+    long_body = {"detail": "x" * 5000}
+    session = FakeSession(
+        [FakeResponse(status_code=500, body=long_body, reason="Internal Server Error")]
+    )
+    client = BrightpearlClient(
+        config, session=session, max_retries=0, sleep=lambda _s: None
+    )
+    with pytest.raises(BrightpearlError) as excinfo:
+        client.get("/x")
+    assert "..." in str(excinfo.value)
 
 
 def test_429_is_retried_honouring_retry_after(config: BrightpearlConfig) -> None:

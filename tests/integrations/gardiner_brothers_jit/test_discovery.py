@@ -66,7 +66,7 @@ def test_returns_none_when_supplier_not_found() -> None:
 
 def test_finds_price_list_in_top_level_list() -> None:
     bp = FakeBrightpearl()
-    bp.responses["/product-price-service/price-list"] = [
+    bp.responses["/product-service/price-list"] = [
         {"id": 1, "name": "Default"},
         {"id": 7, "name": "Cost Price GBR (Net)"},
     ]
@@ -75,7 +75,7 @@ def test_finds_price_list_in_top_level_list() -> None:
 
 def test_finds_price_list_when_keyed_by_id() -> None:
     bp = FakeBrightpearl()
-    bp.responses["/product-price-service/price-list"] = {
+    bp.responses["/product-service/price-list"] = {
         "1": {"name": "Default"},
         "7": {"name": "Cost Price GBR (Net)"},
     }
@@ -112,7 +112,7 @@ def test_discover_returns_complete_result_when_everything_found() -> None:
             {"contactId": 4242, "companyName": "Gardiner Bros & Co (B1358)"}
         ]
     }
-    bp.responses["/product-price-service/price-list"] = [
+    bp.responses["/product-service/price-list"] = [
         {"id": 7, "name": "Cost Price GBR (Net)"}
     ]
     bp.responses["/order-service/order-status"] = [
@@ -130,7 +130,7 @@ def test_discover_returns_complete_result_when_everything_found() -> None:
 def test_discover_partial_results_is_marked_incomplete() -> None:
     bp = FakeBrightpearl()
     bp.responses["/contact-service/contact-search"] = {"results": []}
-    bp.responses["/product-price-service/price-list"] = [
+    bp.responses["/product-service/price-list"] = [
         {"id": 7, "name": "Cost Price GBR (Net)"}
     ]
     bp.responses["/order-service/order-status"] = []

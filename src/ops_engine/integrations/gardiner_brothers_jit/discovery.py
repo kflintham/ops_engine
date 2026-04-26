@@ -80,7 +80,7 @@ def find_supplier_id(bp: BrightpearlClient, exact_name: str) -> int | None:
 
 
 def find_price_list_id(bp: BrightpearlClient, exact_name: str) -> int | None:
-    response = bp.get("/product-price-service/price-list")
+    response = bp.get("/product-service/price-list")
     return _id_for_exact_match(
         response,
         name_field="name",

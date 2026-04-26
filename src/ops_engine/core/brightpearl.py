@@ -15,6 +15,7 @@ Credentials are loaded from environment variables (see ``.env.example``):
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -67,9 +68,29 @@ class BrightpearlConfig:
 
 class BrightpearlError(Exception):
     def __init__(self, status: int, message: str, body: Any = None) -> None:
-        super().__init__(f"Brightpearl API error {status}: {message}")
+        super().__init__(
+            f"Brightpearl API error {status}: {message}{_summarise_body(body)}"
+        )
         self.status = status
         self.body = body
+
+
+_BODY_SUMMARY_LIMIT = 500
+
+
+def _summarise_body(body: Any) -> str:
+    if body is None or body == "":
+        return ""
+    if isinstance(body, (dict, list)):
+        try:
+            text = json.dumps(body)
+        except (TypeError, ValueError):
+            text = repr(body)
+    else:
+        text = str(body)
+    if len(text) > _BODY_SUMMARY_LIMIT:
+        text = text[:_BODY_SUMMARY_LIMIT] + "..."
+    return f" -- {text}"
 
 
 class BrightpearlClient:
