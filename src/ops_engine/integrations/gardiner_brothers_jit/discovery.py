@@ -138,13 +138,49 @@ def _id_for_exact_match(
     id_field: str = "contactId",
 ) -> int | None:
     for entry in _iter_entries(response):
-        name = entry.get(name_field)
-        if isinstance(name, str) and name.strip() == target:
-            raw_id = entry.get(id_field) or entry.get("id")
-            if isinstance(raw_id, int):
-                return raw_id
-            if isinstance(raw_id, str) and raw_id.strip().isdigit():
-                return int(raw_id.strip())
+        name = _extract_name(entry.get(name_field))
+        if name is not None and name.strip() == target:
+            return _extract_id(entry, primary=id_field)
+    return None
+
+
+# Brightpearl uses different ID field names per service:
+#  - contact-search       -> contactId
+#  - product-service       -> id
+#  - product-service/price-list -> id
+#  - order-service/order-status -> statusId
+# The helper tries the caller's preferred field first, then any of these.
+_ID_FALLBACK_FIELDS = ("id", "statusId", "contactId", "priceListId")
+
+
+def _extract_name(value: Any) -> str | None:
+    """Brightpearl sometimes returns names as plain strings (order-status,
+    contact-search) and sometimes as ``{"text": ..., "format": "PLAINTEXT"}``
+    (price-list). Return the displayable string regardless."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        text = value.get("text")
+        if isinstance(text, str):
+            return text
+    return None
+
+
+def _extract_id(entry: Mapping[str, Any], *, primary: str | None = None) -> int | None:
+    candidates: list[str] = []
+    if primary:
+        candidates.append(primary)
+    for field in _ID_FALLBACK_FIELDS:
+        if field not in candidates:
+            candidates.append(field)
+    for field in candidates:
+        raw = entry.get(field)
+        if isinstance(raw, bool):
+            continue
+        if isinstance(raw, int):
+            return raw
+        if isinstance(raw, str) and raw.strip().isdigit():
+            return int(raw.strip())
     return None
 
 
@@ -181,14 +217,10 @@ def _iter_entries(response: Any) -> Iterable[Mapping[str, Any]]:
 def _all_id_name_entries(response: Any) -> list[tuple[int, str]]:
     entries: list[tuple[int, str]] = []
     for entry in _iter_entries(response):
-        name = entry.get("name")
-        raw_id = entry.get("id")
-        if not isinstance(name, str):
-            continue
-        if isinstance(raw_id, int) and not isinstance(raw_id, bool):
-            entries.append((raw_id, name))
-        elif isinstance(raw_id, str) and raw_id.strip().isdigit():
-            entries.append((int(raw_id.strip()), name))
+        name = _extract_name(entry.get("name"))
+        entry_id = _extract_id(entry, primary=None)
+        if name is not None and entry_id is not None:
+            entries.append((entry_id, name))
     return entries
 
 

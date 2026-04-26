@@ -257,3 +257,66 @@ def test_list_order_statuses_returns_id_name_pairs() -> None:
         (101, "Open"),
         (102, "Closed"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Brightpearl real-world shapes
+# ---------------------------------------------------------------------------
+
+
+def test_finds_price_list_when_name_is_plaintext_dict() -> None:
+    """Brightpearl's product-service returns name as a dict with .text."""
+    bp = FakeBrightpearl()
+    bp.responses["/product-service/price-list"] = [
+        {
+            "id": 1,
+            "name": {"languageCode": "en", "text": "Default", "format": "PLAINTEXT"},
+        },
+        {
+            "id": 26,
+            "name": {
+                "languageCode": "en",
+                "text": "Cost Price GBR (Net)",
+                "format": "PLAINTEXT",
+            },
+        },
+    ]
+    assert discovery.find_price_list_id(bp, "Cost Price GBR (Net)") == 26
+
+
+def test_lists_price_lists_when_name_is_plaintext_dict() -> None:
+    bp = FakeBrightpearl()
+    bp.responses["/product-service/price-list"] = [
+        {"id": 1, "name": {"text": "Default"}},
+        {"id": 26, "name": {"text": "Cost Price GBR (Net)"}},
+    ]
+    assert discovery.list_price_lists(bp) == [
+        (1, "Default"),
+        (26, "Cost Price GBR (Net)"),
+    ]
+
+
+def test_finds_order_status_when_id_field_is_statusId() -> None:
+    """Brightpearl's order-service uses statusId, not id."""
+    bp = FakeBrightpearl()
+    bp.responses["/order-service/order-status"] = [
+        {"statusId": 5, "name": "Cancelled", "orderTypeCode": "SO"},
+        {"statusId": 139, "name": "GBR JIT - Request Sent", "orderTypeCode": "PO"},
+        {"statusId": 137, "name": "GBR JIT - Pending", "orderTypeCode": "PO"},
+    ]
+    assert (
+        discovery.find_order_status_id(bp, "GBR JIT - Request Sent") == 139
+    )
+    assert discovery.find_order_status_id(bp, "GBR JIT - Pending") == 137
+
+
+def test_lists_order_statuses_with_statusId_field() -> None:
+    bp = FakeBrightpearl()
+    bp.responses["/order-service/order-status"] = [
+        {"statusId": 139, "name": "GBR JIT - Request Sent"},
+        {"statusId": 137, "name": "GBR JIT - Pending"},
+    ]
+    assert discovery.list_order_statuses(bp) == [
+        (139, "GBR JIT - Request Sent"),
+        (137, "GBR JIT - Pending"),
+    ]
