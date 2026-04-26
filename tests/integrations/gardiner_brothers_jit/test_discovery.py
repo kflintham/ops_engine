@@ -169,3 +169,91 @@ def test_format_env_snippet_marks_missing_values() -> None:
     snippet = discovery.format_env_snippet(result)
     assert snippet.count("NOT FOUND") == 3
     assert "GBR_JIT_PRICE_LIST_ID=7" in snippet
+
+
+# ---------------------------------------------------------------------------
+# Candidate listing when something isn't found by exact match
+# ---------------------------------------------------------------------------
+
+
+def test_discover_lists_price_lists_when_target_not_found() -> None:
+    bp = FakeBrightpearl()
+    bp.responses["/contact-service/contact-search"] = {
+        "results": [
+            {"contactId": 4242, "companyName": "Gardiner Bros & Co (B1358)"}
+        ]
+    }
+    bp.responses["/product-service/price-list"] = [
+        {"id": 1, "name": "Default"},
+        {"id": 2, "name": "Cost Price GBR Net"},  # close but not exact
+    ]
+    bp.responses["/order-service/order-status"] = [
+        {"id": 101, "name": "GBR JIT - Request Sent"},
+        {"id": 102, "name": "GBR JIT - Pending"},
+    ]
+    result = discovery.discover(bp)
+    assert result.price_list_id is None
+    assert (1, "Default") in result.available_price_lists
+    assert (2, "Cost Price GBR Net") in result.available_price_lists
+    # Order statuses were all found, so we don't fetch / surface them.
+    assert result.available_order_statuses == ()
+
+
+def test_format_env_snippet_includes_price_list_candidates_when_missing() -> None:
+    result = discovery.DiscoveryResult(
+        supplier_contact_id=341,
+        price_list_id=None,
+        status_id_request_sent=101,
+        status_id_pending=102,
+        available_price_lists=(
+            (2, "Cost Price GBR Net"),
+            (1, "Default"),
+        ),
+    )
+    snippet = discovery.format_env_snippet(result)
+    assert "Available price lists" in snippet
+    assert "Cost Price GBR Net" in snippet
+    assert "Default" in snippet
+    # Lines are sorted by ID.
+    assert snippet.find("Default") < snippet.find("Cost Price GBR Net")
+
+
+def test_format_env_snippet_includes_status_candidates_when_missing() -> None:
+    result = discovery.DiscoveryResult(
+        supplier_contact_id=341,
+        price_list_id=7,
+        status_id_request_sent=None,
+        status_id_pending=None,
+        available_order_statuses=(
+            (10, "GBR JIT - Pending"),
+            (11, "GBR JIT - Request sent"),  # different capitalisation
+        ),
+    )
+    snippet = discovery.format_env_snippet(result)
+    assert "Available order statuses" in snippet
+    assert "GBR JIT - Request sent" in snippet
+    assert "GBR JIT - Pending" in snippet
+
+
+def test_list_price_lists_returns_id_name_pairs() -> None:
+    bp = FakeBrightpearl()
+    bp.responses["/product-service/price-list"] = [
+        {"id": 1, "name": "Default"},
+        {"id": 7, "name": "Cost Price GBR (Net)"},
+    ]
+    assert discovery.list_price_lists(bp) == [
+        (1, "Default"),
+        (7, "Cost Price GBR (Net)"),
+    ]
+
+
+def test_list_order_statuses_returns_id_name_pairs() -> None:
+    bp = FakeBrightpearl()
+    bp.responses["/order-service/order-status"] = [
+        {"id": 101, "name": "Open"},
+        {"id": 102, "name": "Closed"},
+    ]
+    assert discovery.list_order_statuses(bp) == [
+        (101, "Open"),
+        (102, "Closed"),
+    ]

@@ -37,6 +37,8 @@ class DiscoveryResult:
     price_list_id: int | None
     status_id_request_sent: int | None
     status_id_pending: int | None
+    available_price_lists: tuple[tuple[int, str], ...] = ()
+    available_order_statuses: tuple[tuple[int, str], ...] = ()
 
     @property
     def is_complete(self) -> bool:
@@ -52,12 +54,36 @@ class DiscoveryResult:
 
 
 def discover(bp: BrightpearlClient) -> DiscoveryResult:
+    supplier_id = find_supplier_id(bp, SUPPLIER_NAME)
+    price_list_id = find_price_list_id(bp, PRICE_LIST_NAME)
+    status_request = find_order_status_id(bp, STATUS_REQUEST_SENT_NAME)
+    status_pending = find_order_status_id(bp, STATUS_PENDING_NAME)
+
+    # Only fetch the full candidate lists when needed -- saves an API call
+    # when everything was found by exact match.
+    available_price_lists: tuple[tuple[int, str], ...] = ()
+    available_order_statuses: tuple[tuple[int, str], ...] = ()
+    if price_list_id is None:
+        available_price_lists = tuple(list_price_lists(bp))
+    if status_request is None or status_pending is None:
+        available_order_statuses = tuple(list_order_statuses(bp))
+
     return DiscoveryResult(
-        supplier_contact_id=find_supplier_id(bp, SUPPLIER_NAME),
-        price_list_id=find_price_list_id(bp, PRICE_LIST_NAME),
-        status_id_request_sent=find_order_status_id(bp, STATUS_REQUEST_SENT_NAME),
-        status_id_pending=find_order_status_id(bp, STATUS_PENDING_NAME),
+        supplier_contact_id=supplier_id,
+        price_list_id=price_list_id,
+        status_id_request_sent=status_request,
+        status_id_pending=status_pending,
+        available_price_lists=available_price_lists,
+        available_order_statuses=available_order_statuses,
     )
+
+
+def list_price_lists(bp: BrightpearlClient) -> list[tuple[int, str]]:
+    return _all_id_name_entries(bp.get("/product-service/price-list"))
+
+
+def list_order_statuses(bp: BrightpearlClient) -> list[tuple[int, str]]:
+    return _all_id_name_entries(bp.get("/order-service/order-status"))
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +178,20 @@ def _iter_entries(response: Any) -> Iterable[Mapping[str, Any]]:
                     yield value
 
 
+def _all_id_name_entries(response: Any) -> list[tuple[int, str]]:
+    entries: list[tuple[int, str]] = []
+    for entry in _iter_entries(response):
+        name = entry.get("name")
+        raw_id = entry.get("id")
+        if not isinstance(name, str):
+            continue
+        if isinstance(raw_id, int) and not isinstance(raw_id, bool):
+            entries.append((raw_id, name))
+        elif isinstance(raw_id, str) and raw_id.strip().isdigit():
+            entries.append((int(raw_id.strip()), name))
+    return entries
+
+
 def _meta_column_names(meta: Any) -> list[str]:
     if not isinstance(meta, Mapping):
         return []
@@ -183,6 +223,22 @@ def format_env_snippet(result: DiscoveryResult) -> str:
         f"GBR_JIT_STATUS_ID_REQUEST_SENT={_render(result.status_id_request_sent)}",
         f"GBR_JIT_STATUS_ID_PENDING={_render(result.status_id_pending)}",
     ]
+
+    if result.price_list_id is None and result.available_price_lists:
+        lines.append("")
+        lines.append("Available price lists in your Brightpearl:")
+        for id_, name in sorted(result.available_price_lists):
+            lines.append(f"  {id_:>6}  {name}")
+
+    if (
+        result.status_id_request_sent is None
+        or result.status_id_pending is None
+    ) and result.available_order_statuses:
+        lines.append("")
+        lines.append("Available order statuses in your Brightpearl:")
+        for id_, name in sorted(result.available_order_statuses):
+            lines.append(f"  {id_:>6}  {name}")
+
     return "\n".join(lines) + "\n"
 
 
