@@ -118,6 +118,15 @@ def test_supplier_ids_parses_supplier_entries() -> None:
     assert result == {501: [4242, 9999], 502: [4242]}
 
 
+def test_supplier_ids_parses_plain_integer_lists() -> None:
+    """Brightpearl's actual shape: a list of bare integer contact IDs."""
+    bp = FakeBrightpearl()
+    bp.get_responses["/product-service/product/53095/supplier"] = {
+        "53095": [12, 13, 14, 341],
+    }
+    assert q.get_product_supplier_ids(bp, [53095]) == {53095: [12, 13, 14, 341]}
+
+
 def test_supplier_ids_fills_in_missing_products_with_empty_list() -> None:
     bp = FakeBrightpearl()
     bp.get_responses["/product-service/product/501/supplier"] = {}

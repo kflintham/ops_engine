@@ -65,11 +65,10 @@ def get_product_supplier_ids(
 ) -> dict[int, list[int]]:
     """Return the supplier contact IDs associated with each product.
 
-    Assumed endpoint: ``GET /product-service/product/{ids}/supplier`` where
-    ``ids`` is a comma-separated list of product IDs. The response is
-    assumed to be keyed by product ID with a list of supplier entries
-    containing a ``supplierId`` field. If the live endpoint differs (some
-    Brightpearl accounts expose suppliers differently), adjust here.
+    Endpoint: ``GET /product-service/product/{ids}/supplier``. Brightpearl
+    returns a dict keyed by product ID; the value is either a list of plain
+    integer contact IDs (the common shape) or a list of objects with a
+    ``supplierId`` / ``contactId`` field. Both shapes are handled.
     """
     if not product_ids:
         return {}
@@ -82,12 +81,23 @@ def get_product_supplier_ids(
             supplier_ids: list[int] = []
             if isinstance(entries, list):
                 for entry in entries:
-                    if isinstance(entry, Mapping):
-                        supplier_id = entry.get("supplierId") or entry.get(
-                            "contactId"
+                    if isinstance(entry, bool):
+                        continue
+                    if isinstance(entry, int):
+                        supplier_ids.append(entry)
+                    elif isinstance(entry, str) and entry.strip().isdigit():
+                        supplier_ids.append(int(entry.strip()))
+                    elif isinstance(entry, Mapping):
+                        raw = (
+                            entry.get("supplierId")
+                            or entry.get("contactId")
+                            or entry.get("id")
                         )
-                        if supplier_id is not None:
-                            supplier_ids.append(_as_int(supplier_id))
+                        if raw is not None:
+                            try:
+                                supplier_ids.append(_as_int(raw))
+                            except ValueError:
+                                continue
             result[product_id] = supplier_ids
     for product_id in product_ids:
         result.setdefault(product_id, [])
