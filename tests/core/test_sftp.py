@@ -16,6 +16,7 @@ class FakeSession:
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
         self.listings: dict[str, list[str]] = {}
+        self.directories: set[str] = set()
         self.closed = False
         self.operations: list[tuple[str, tuple[Any, ...]]] = []
 
@@ -34,6 +35,16 @@ class FakeSession:
     def listdir(self, path: str = ".") -> list[str]:
         self.operations.append(("listdir", (path,)))
         return list(self.listings.get(path, []))
+
+    def mkdir(self, path: str) -> None:
+        self.operations.append(("mkdir", (path,)))
+        self.directories.add(path)
+
+    def stat(self, path: str) -> Any:
+        self.operations.append(("stat", (path,)))
+        if path in self.directories:
+            return object()
+        raise IOError(f"No such file: {path}")
 
     def remove(self, path: str) -> None:
         self.operations.append(("remove", (path,)))
@@ -228,3 +239,45 @@ def test_context_manager_closes_on_exception(config: SftpConfig) -> None:
 def test_close_is_idempotent(client: SftpClient) -> None:
     client.close()
     client.close()  # must not raise
+
+
+def test_ensure_dir_creates_missing_parents(
+    client: SftpClient, session: FakeSession
+) -> None:
+    client.ensure_dir("/JIT/Orders")
+    assert "/JIT" in session.directories
+    assert "/JIT/Orders" in session.directories
+
+
+def test_ensure_dir_skips_existing_components(
+    client: SftpClient, session: FakeSession
+) -> None:
+    session.directories.add("/JIT")  # already there
+    client.ensure_dir("/JIT/Orders")
+    assert "/JIT/Orders" in session.directories
+    # /JIT was not re-created.
+    mkdirs = [op for op in session.operations if op[0] == "mkdir"]
+    assert mkdirs == [("mkdir", ("/JIT/Orders",))]
+
+
+def test_ensure_dir_is_idempotent(
+    client: SftpClient, session: FakeSession
+) -> None:
+    client.ensure_dir("/JIT/Orders")
+    client.ensure_dir("/JIT/Orders")
+    mkdir_count = sum(1 for op in session.operations if op[0] == "mkdir")
+    assert mkdir_count == 2  # only the first call needed to create the dirs
+
+
+def test_ensure_dir_handles_trailing_slash(
+    client: SftpClient, session: FakeSession
+) -> None:
+    client.ensure_dir("/JIT/Orders/")
+    assert "/JIT/Orders" in session.directories
+
+
+def test_ensure_dir_noop_for_root(
+    client: SftpClient, session: FakeSession
+) -> None:
+    client.ensure_dir("/")
+    assert session.directories == set()

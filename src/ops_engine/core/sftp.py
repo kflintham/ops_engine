@@ -76,6 +76,8 @@ class _SftpSession(Protocol):
     def putfo(self, fl: Any, remotepath: str) -> Any: ...
     def getfo(self, remotepath: str, fl: Any) -> Any: ...
     def listdir(self, path: str = ".") -> list[str]: ...
+    def mkdir(self, path: str) -> None: ...
+    def stat(self, path: str) -> Any: ...
     def remove(self, path: str) -> None: ...
     def rename(self, oldpath: str, newpath: str) -> None: ...
     def close(self) -> None: ...
@@ -132,6 +134,26 @@ class SftpClient:
     def rename(self, source: str, destination: str) -> None:
         self._open().rename(source, destination)
 
+    def ensure_dir(self, remote_path: str) -> None:
+        """Create ``remote_path`` and any missing parents. Idempotent."""
+        if not remote_path or remote_path in ("/", "."):
+            return
+        session = self._open()
+        parts = remote_path.strip("/").split("/")
+        is_absolute = remote_path.startswith("/")
+        prefix = "/" if is_absolute else ""
+        accumulated = prefix
+        for part in parts:
+            if not part:
+                continue
+            accumulated = (
+                f"{accumulated}{part}" if accumulated == "/" else f"{accumulated}/{part}"
+            )
+            try:
+                session.stat(accumulated)
+            except IOError:
+                session.mkdir(accumulated)
+
     def _open(self) -> _SftpSession:
         if self._session is None:
             self._session = self._connect(self._config)
@@ -177,6 +199,12 @@ class _ParamikoSession:
 
     def listdir(self, path: str = ".") -> list[str]:
         return self._sftp.listdir(path)
+
+    def mkdir(self, path: str) -> None:
+        self._sftp.mkdir(path)
+
+    def stat(self, path: str) -> Any:
+        return self._sftp.stat(path)
 
     def remove(self, path: str) -> None:
         self._sftp.remove(path)
