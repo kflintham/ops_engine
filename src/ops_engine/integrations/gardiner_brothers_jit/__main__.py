@@ -76,6 +76,18 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     p_dump.set_defaults(func=_cmd_dump)
 
+    p_list_sftp = sub.add_parser(
+        "list-sftp",
+        help="List files in an SFTP directory (for debugging)",
+    )
+    p_list_sftp.add_argument(
+        "path",
+        nargs="?",
+        default="/",
+        help="Remote path to list (default: /)",
+    )
+    p_list_sftp.set_defaults(func=_cmd_list_sftp)
+
     p_setup = sub.add_parser(
         "setup-folders",
         help="Create the JIT folders on the SFTP server",
@@ -110,6 +122,22 @@ def _cmd_dump(_args: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001 -- this is a diagnostics tool
             sys.stdout.write(f"ERROR: {type(exc).__name__}: {exc}")
         sys.stdout.write("\n")
+    return 0
+
+
+def _cmd_list_sftp(args: argparse.Namespace) -> int:
+    sftp_cfg = SftpConfig.from_env(prefix=_SFTP_PREFIX)
+    with SftpClient(sftp_cfg) as sftp:
+        try:
+            entries = sorted(sftp.list_dir(args.path))
+        except Exception as exc:  # noqa: BLE001 -- diagnostics tool
+            sys.stderr.write(f"ERROR listing {args.path}: {exc}\n")
+            return 1
+    sys.stdout.write(f"Contents of {args.path}:\n")
+    if not entries:
+        sys.stdout.write("  (empty)\n")
+    for name in entries:
+        sys.stdout.write(f"  {name}\n")
     return 0
 
 
