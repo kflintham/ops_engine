@@ -1,24 +1,23 @@
 """Map a Brightpearl purchase-order payload into an :class:`Order`.
 
 This module is pure: no HTTP, no SFTP, no env vars. It takes a Brightpearl
-PO dict plus two pre-fetched lookup maps (product -> supplier IDs, product
--> Gardiners SKU) and produces an :class:`Order` ready for
-:func:`build_order_csv`, or raises :class:`GbrJitMappingError` with a clear
-message if the PO violates any of the JIT business rules recorded in
-``docs/gardiner-brothers-jit/field-mapping.md``.
+PO dict plus a pre-fetched product->supplier map and produces an
+:class:`Order` ready for :func:`build_order_csv`, or raises
+:class:`GbrJitMappingError` with a clear message if the PO violates any of
+the JIT business rules recorded in ``docs/gardiner-brothers-jit/field-mapping.md``.
 
-Brightpearl API response shape notes (treat as working assumptions;
-verify against real data at implementation time):
+Verified Brightpearl response shapes (from a real PO on the WBYS account):
 
 - ``po["id"]`` -- integer PO ID.
-- ``po.get("ref")`` -- optional human reference; falls back to ``str(po["id"])``.
-- ``po["orderRows"]`` -- either a ``dict`` keyed by row ID (common) or a
-  ``list`` of row objects. Normalised below.
-- ``row["id"]`` -- integer row ID (when rows are a list); when rows are a
-  dict, the key is the row ID.
+- ``po.get("reference")`` -- optional human reference (also accepts ``ref``);
+  falls back to ``str(po["id"])``.
+- ``po["orderRows"]`` -- a ``dict`` keyed by row ID (Brightpearl's actual
+  shape); a ``list`` of row objects is also accepted defensively.
 - ``row["productId"]`` -- integer product ID.
-- ``row["productQuantity"]["magnitude"]`` -- quantity as a string decimal,
-  e.g. ``"1.000000"``.
+- ``row["productSku"]`` -- the SKU as recorded on the order row at the
+  PO's price list. Used directly as the Gardiners SKU.
+- ``row["quantity"]["magnitude"]`` -- quantity as a string decimal,
+  e.g. ``"2.0000"``.
 """
 from __future__ import annotations
 
@@ -36,7 +35,6 @@ def build_order_from_po(
     po: Mapping[str, Any],
     *,
     product_supplier_ids: Mapping[int, list[int]],
-    product_gardiners_skus: Mapping[int, str | None],
     required_supplier_contact_id: int,
 ) -> Order:
     po_id = _require_int(po, "id")
@@ -54,7 +52,7 @@ def build_order_from_po(
                 product_supplier_ids,
                 required_supplier_contact_id,
             )
-            sku = _resolve_gardiners_sku(product_id, product_gardiners_skus)
+            sku = _resolve_row_sku(row, ctx=f"row {row_id}")
             quantity = _parse_quantity(row, ctx=f"row {row_id}")
         except GbrJitMappingError as exc:
             errors.append(str(exc))
@@ -84,9 +82,10 @@ def build_order_from_po(
 
 
 def _order_reference(po: Mapping[str, Any]) -> str:
-    ref = po.get("ref")
-    if isinstance(ref, str) and ref.strip():
-        return ref.strip()
+    for key in ("ref", "reference"):
+        ref = po.get(key)
+        if isinstance(ref, str) and ref.strip():
+            return ref.strip()
     return str(_require_int(po, "id"))
 
 
@@ -129,23 +128,18 @@ def _assert_product_has_supplier(
         )
 
 
-def _resolve_gardiners_sku(
-    product_id: int,
-    product_gardiners_skus: Mapping[int, str | None],
-) -> str:
-    sku = product_gardiners_skus.get(product_id)
-    if not sku or not sku.strip():
-        raise GbrJitMappingError(
-            f"product {product_id} has no SKU on the Gardiners price list"
-        )
+def _resolve_row_sku(row: Mapping[str, Any], *, ctx: str) -> str:
+    sku = row.get("productSku")
+    if not isinstance(sku, str) or not sku.strip():
+        raise GbrJitMappingError(f"{ctx}: missing productSku")
     return sku.strip()
 
 
 def _parse_quantity(row: Mapping[str, Any], *, ctx: str) -> int:
-    quantity_obj = row.get("productQuantity") or {}
+    quantity_obj = row.get("quantity") or {}
     magnitude = quantity_obj.get("magnitude") if isinstance(quantity_obj, Mapping) else None
     if magnitude is None:
-        raise GbrJitMappingError(f"{ctx}: missing productQuantity.magnitude")
+        raise GbrJitMappingError(f"{ctx}: missing quantity.magnitude")
     try:
         decimal = Decimal(str(magnitude))
     except (InvalidOperation, ValueError) as exc:

@@ -104,57 +104,6 @@ def get_product_supplier_ids(
     return result
 
 
-def get_product_gardiners_skus(
-    bp: BrightpearlClient,
-    product_ids: list[int],
-    *,
-    price_list_id: int,
-) -> dict[int, str | None]:
-    """Return the Gardiners SKU for each product.
-
-    TEMPORARY: this currently returns ``product.identity.sku`` (the WBYS
-    internal SKU). The intended source -- the per-price-list SKU field on
-    the ``Cost Price GBR (Net)`` price list, labelled "Optional supplier
-    or customer-specific product code" in the Brightpearl UI -- doesn't
-    appear to be exposed by the obvious public-API endpoints on this
-    account (``/product-service/product/{id}/price`` 404s,
-    ``/product-price-service/product-price/{id}`` and the search variant
-    both 500). For products whose primary supplier is Gardiners the
-    internal SKU matches the Gardiners SKU, so this shortcut works for
-    the common case. It will silently send the wrong code for any
-    product that's also sourced from a different supplier with a
-    different code; revisit once we know which endpoint exposes the
-    price-list-specific SKU.
-
-    The ``price_list_id`` parameter is retained on the signature so the
-    rest of the integration doesn't need to change when the proper
-    lookup lands.
-    """
-    if not product_ids:
-        return {}
-    path = f"/product-service/product/{_csv_ids(product_ids)}"
-    response = bp.get(path)
-    result: dict[int, str | None] = {}
-    items = response if isinstance(response, list) else []
-    for product in items:
-        if not isinstance(product, Mapping):
-            continue
-        try:
-            product_id = _as_int(product.get("id"))
-        except ValueError:
-            continue
-        identity = product.get("identity")
-        sku: str | None = None
-        if isinstance(identity, Mapping):
-            raw = identity.get("sku")
-            if isinstance(raw, str) and raw.strip():
-                sku = raw.strip()
-        result[product_id] = sku
-    for product_id in product_ids:
-        result.setdefault(product_id, None)
-    return result
-
-
 def set_order_status(
     bp: BrightpearlClient, order_id: int, *, status_id: int
 ) -> None:

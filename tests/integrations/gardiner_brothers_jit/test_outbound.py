@@ -91,7 +91,14 @@ def _install_po(
     rows: list[dict[str, Any]] | None = None,
 ) -> None:
     if rows is None:
-        rows = [{"id": 1, "productId": 501, "productQuantity": {"magnitude": "1"}}]
+        rows = [
+            {
+                "id": 1,
+                "productId": 501,
+                "productSku": "34233-58447-07",
+                "quantity": {"magnitude": "1"},
+            }
+        ]
     po: dict[str, Any] = {"id": order_id, "orderRows": rows}
     if ref:
         po["ref"] = ref
@@ -102,9 +109,6 @@ def _install_product_catalog(bp: FakeBrightpearl) -> None:
     bp.get_responses["/product-service/product/501/supplier"] = {
         "501": [B1358_ID]
     }
-    bp.get_responses["/product-service/product/501"] = [
-        {"id": 501, "identity": {"sku": "34233-58447-07"}}
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -179,9 +183,6 @@ def test_mapping_failure_records_failure_and_does_not_upload(
     bp.get_responses["/product-service/product/501/supplier"] = {
         "501": [9999]
     }
-    bp.get_responses["/product-service/product/501"] = [
-        {"id": 501, "identity": {"sku": "ANY"}}
-    ]
 
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
 
@@ -241,12 +242,18 @@ def test_one_po_failure_does_not_stop_the_others(
         bp,
         666,
         ref="PO-666",
-        rows=[{"id": 1, "productId": 999, "productQuantity": {"magnitude": "1"}}],
+        rows=[
+            {
+                "id": 1,
+                "productId": 999,
+                "productSku": "X",
+                "quantity": {"magnitude": "1"},
+            }
+        ],
     )
     _install_product_catalog(bp)
     # Product 999 has no catalog info -> mapping fails for PO 666.
     bp.get_responses["/product-service/product/999/supplier"] = {"999": []}
-    bp.get_responses["/product-service/product/999"] = [{"id": 999}]
 
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
 

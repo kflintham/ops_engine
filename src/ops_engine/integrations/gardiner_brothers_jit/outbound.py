@@ -118,14 +118,10 @@ def _build_order(
 ) -> Order:
     product_ids = _product_ids_for(po)
     supplier_map = queries.get_product_supplier_ids(bp, product_ids)
-    sku_map = queries.get_product_gardiners_skus(
-        bp, product_ids, price_list_id=config.gardiners_price_list_id
-    )
     try:
         return build_order_from_po(
             po,
             product_supplier_ids=supplier_map,
-            product_gardiners_skus=sku_map,
             required_supplier_contact_id=config.gardiners_jit_supplier_contact_id,
         )
     except GbrJitMappingError:
@@ -160,13 +156,29 @@ def _product_ids_for(po: Mapping[str, object]) -> list[int]:
 def _remote_path(config: GbrJitConfig, order: Order, clock: ClockFn) -> str:
     timestamp = clock().strftime(_TIMESTAMP_FORMAT)
     filename = config.file_name_template.format(
-        order_reference=order.reference,
+        order_reference=_safe_for_filename(order.reference),
         timestamp=timestamp,
     )
     folder = config.orders_remote_path
     if not folder.endswith("/"):
         folder = folder + "/"
     return folder + filename
+
+
+def _safe_for_filename(reference: str) -> str:
+    """Replace characters that cause problems in remote filenames.
+
+    The full reference still goes into the CSV's Order Reference column;
+    this only affects the SFTP filename.
+    """
+    safe: list[str] = []
+    for ch in reference:
+        if ch.isalnum() or ch in {"-", "_", "."}:
+            safe.append(ch)
+        else:
+            safe.append("_")
+    cleaned = "".join(safe).strip("_")
+    return cleaned or "po"
 
 
 def _default_clock() -> datetime:
