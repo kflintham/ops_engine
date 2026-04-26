@@ -30,6 +30,7 @@ class FakeBrightpearl:
         self.get_responses: dict[str, Any] = {}
         self.get_calls: list[tuple[str, dict[str, Any] | None]] = []
         self.post_calls: list[tuple[str, Any]] = []
+        self.put_calls: list[tuple[str, Any]] = []
         self._fail_status_update_for: set[int] = set()
 
     def get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
@@ -38,6 +39,10 @@ class FakeBrightpearl:
 
     def post(self, path: str, *, json: Any = None) -> Any:
         self.post_calls.append((path, json))
+        return None
+
+    def put(self, path: str, *, json: Any = None) -> Any:
+        self.put_calls.append((path, json))
         for order_id in self._fail_status_update_for:
             if path == f"/order-service/order/{order_id}/status":
                 raise RuntimeError("status API is down")
@@ -143,7 +148,7 @@ def test_sends_one_po_and_transitions_status(
     assert (
         "/order-service/order/555/status",
         {"orderStatusId": STATUS_PENDING},
-    ) in bp.post_calls
+    ) in bp.put_calls
 
 
 def test_handles_no_pos_to_send(
@@ -153,7 +158,7 @@ def test_handles_no_pos_to_send(
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
     assert summary.results == []
     assert sftp.files == {}
-    assert bp.post_calls == []
+    assert bp.put_calls == []
 
 
 def test_falls_back_to_numeric_order_id_when_ref_missing(
@@ -192,7 +197,7 @@ def test_mapping_failure_records_failure_and_does_not_upload(
     assert sftp.files == {}
     # PO status was NOT transitioned -- it stays on Request Sent for retry.
     assert not any(
-        call[0].endswith("/status") for call in bp.post_calls
+        call[0].endswith("/status") for call in bp.put_calls
     )
 
 
@@ -209,7 +214,7 @@ def test_sftp_failure_leaves_po_on_request_sent(
     assert len(summary.failures) == 1
     assert "upload failed" in (summary.failures[0].error or "")
     assert not any(
-        call[0].endswith("/status") for call in bp.post_calls
+        call[0].endswith("/status") for call in bp.put_calls
     )
 
 

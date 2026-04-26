@@ -11,6 +11,7 @@ class FakeBrightpearl:
     def __init__(self) -> None:
         self.get_calls: list[tuple[str, dict[str, Any] | None]] = []
         self.post_calls: list[tuple[str, Any]] = []
+        self.put_calls: list[tuple[str, Any]] = []
         self.get_responses: dict[str, Any] = {}
 
     def get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
@@ -19,6 +20,10 @@ class FakeBrightpearl:
 
     def post(self, path: str, *, json: Any = None) -> Any:
         self.post_calls.append((path, json))
+        return None
+
+    def put(self, path: str, *, json: Any = None) -> Any:
+        self.put_calls.append((path, json))
         return None
 
 
@@ -146,9 +151,10 @@ def test_supplier_ids_deduplicates_input_ids() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_set_order_status_posts_expected_body() -> None:
+def test_set_order_status_puts_expected_body() -> None:
     bp = FakeBrightpearl()
     q.set_order_status(bp, 123, status_id=102)
-    assert bp.post_calls == [
+    assert bp.put_calls == [
         ("/order-service/order/123/status", {"orderStatusId": 102})
     ]
+    assert bp.post_calls == []

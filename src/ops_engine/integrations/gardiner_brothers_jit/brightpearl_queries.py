@@ -109,11 +109,10 @@ def set_order_status(
 ) -> None:
     """Transition a PO to a new custom status.
 
-    Assumed endpoint: ``POST /order-service/order/{id}/status`` with a body
-    of ``{"orderStatusId": <id>}``. Some Brightpearl accounts use
-    ``PUT`` or a different path shape; adjust here if so.
+    Endpoint: ``PUT /order-service/order/{id}/status`` with a body of
+    ``{"orderStatusId": <id>}``. (POST returns 405 on this account.)
     """
-    bp.post(
+    bp.put(
         f"/order-service/order/{order_id}/status",
         json={"orderStatusId": status_id},
     )
