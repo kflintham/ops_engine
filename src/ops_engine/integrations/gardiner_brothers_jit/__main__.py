@@ -9,6 +9,10 @@ Commands:
 - ``discover``         -- print a paste-ready .env.local snippet of the
                           Brightpearl IDs the integration needs
                           (supplier, price list, two PO statuses).
+- ``dump``             -- print the raw JSON Brightpearl returns for the
+                          price-list and order-status endpoints. Useful
+                          when ``discover`` reports NOT FOUND and we need
+                          to see what shape the response actually has.
 - ``setup-folders``    -- create ``/JIT/Orders/`` and ``/JIT/Notifications/``
                           on the SFTP server (idempotent).
 - ``outbound``         -- find any POs on ``GBR JIT - Request Sent`` for
@@ -21,6 +25,7 @@ All commands read their config from environment variables; see
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 
@@ -34,6 +39,10 @@ from .setup import ensure_remote_folders
 
 
 _SFTP_PREFIX = "GBR_SFTP"
+_DUMP_ENDPOINTS = (
+    "/product-service/price-list",
+    "/order-service/order-status",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,6 +67,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     p_discover.set_defaults(func=_cmd_discover)
 
+    p_dump = sub.add_parser(
+        "dump",
+        help=(
+            "Dump raw JSON from Brightpearl for the discovery endpoints "
+            "(for debugging when discover can't find an entry by name)"
+        ),
+    )
+    p_dump.set_defaults(func=_cmd_dump)
+
     p_setup = sub.add_parser(
         "setup-folders",
         help="Create the JIT folders on the SFTP server",
@@ -79,6 +97,20 @@ def _cmd_discover(_args: argparse.Namespace) -> int:
     result = discovery.discover(bp)
     sys.stdout.write(discovery.format_env_snippet(result))
     return 0 if result.is_complete else 2
+
+
+def _cmd_dump(_args: argparse.Namespace) -> int:
+    bp_cfg = BrightpearlConfig.from_env()
+    bp = BrightpearlClient(bp_cfg)
+    for path in _DUMP_ENDPOINTS:
+        sys.stdout.write(f"\n=== GET {path} ===\n")
+        try:
+            response = bp.get(path)
+            sys.stdout.write(json.dumps(response, indent=2, default=str))
+        except Exception as exc:  # noqa: BLE001 -- this is a diagnostics tool
+            sys.stdout.write(f"ERROR: {type(exc).__name__}: {exc}")
+        sys.stdout.write("\n")
+    return 0
 
 
 def _cmd_setup_folders(_args: argparse.Namespace) -> int:
