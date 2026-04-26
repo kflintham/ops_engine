@@ -110,35 +110,46 @@ def get_product_gardiners_skus(
     *,
     price_list_id: int,
 ) -> dict[int, str | None]:
-    """Return the Gardiners SKU for each product from the GBR price list.
+    """Return the Gardiners SKU for each product.
 
-    Assumed endpoint: ``GET /product-service/product/{ids}/price`` where
-    ``ids`` is a comma-separated list. The response is assumed to be keyed
-    by product ID with a list of price-list entries containing
-    ``priceListId`` and ``sku`` fields. If the field is named differently
-    in the live account (some export it as ``productSku`` or
-    ``supplierProductCode``), adjust here.
+    TEMPORARY: this currently returns ``product.identity.sku`` (the WBYS
+    internal SKU). The intended source -- the per-price-list SKU field on
+    the ``Cost Price GBR (Net)`` price list, labelled "Optional supplier
+    or customer-specific product code" in the Brightpearl UI -- doesn't
+    appear to be exposed by the obvious public-API endpoints on this
+    account (``/product-service/product/{id}/price`` 404s,
+    ``/product-price-service/product-price/{id}`` and the search variant
+    both 500). For products whose primary supplier is Gardiners the
+    internal SKU matches the Gardiners SKU, so this shortcut works for
+    the common case. It will silently send the wrong code for any
+    product that's also sourced from a different supplier with a
+    different code; revisit once we know which endpoint exposes the
+    price-list-specific SKU.
+
+    The ``price_list_id`` parameter is retained on the signature so the
+    rest of the integration doesn't need to change when the proper
+    lookup lands.
     """
     if not product_ids:
         return {}
-    path = f"/product-service/product/{_csv_ids(product_ids)}/price"
-    response = bp.get(path) or {}
+    path = f"/product-service/product/{_csv_ids(product_ids)}"
+    response = bp.get(path)
     result: dict[int, str | None] = {}
-    if isinstance(response, Mapping):
-        for product_id_str, entries in response.items():
-            product_id = _as_int(product_id_str)
-            sku: str | None = None
-            if isinstance(entries, list):
-                for entry in entries:
-                    if not isinstance(entry, Mapping):
-                        continue
-                    if _as_int(entry.get("priceListId")) != price_list_id:
-                        continue
-                    raw = entry.get("sku") or entry.get("productSku")
-                    if isinstance(raw, str) and raw.strip():
-                        sku = raw.strip()
-                        break
-            result[product_id] = sku
+    items = response if isinstance(response, list) else []
+    for product in items:
+        if not isinstance(product, Mapping):
+            continue
+        try:
+            product_id = _as_int(product.get("id"))
+        except ValueError:
+            continue
+        identity = product.get("identity")
+        sku: str | None = None
+        if isinstance(identity, Mapping):
+            raw = identity.get("sku")
+            if isinstance(raw, str) and raw.strip():
+                sku = raw.strip()
+        result[product_id] = sku
     for product_id in product_ids:
         result.setdefault(product_id, None)
     return result

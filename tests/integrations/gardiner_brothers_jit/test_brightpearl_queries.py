@@ -146,47 +146,42 @@ def test_supplier_ids_deduplicates_input_ids() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_skus_picks_only_gardiners_price_list() -> None:
+def test_skus_extracts_identity_sku_from_each_product() -> None:
     bp = FakeBrightpearl()
-    bp.get_responses["/product-service/product/501,502/price"] = {
-        "501": [
-            {"priceListId": 1, "sku": "WBYS-INTERNAL"},
-            {"priceListId": 7, "sku": "34233-58447-07"},
-        ],
-        "502": [{"priceListId": 7, "sku": "  24840-41090-04  "}],
-    }
+    bp.get_responses["/product-service/product/501,502"] = [
+        {"id": 501, "identity": {"sku": "34233-58447-07"}},
+        {"id": 502, "identity": {"sku": "  24840-41090-04  "}},
+    ]
     result = q.get_product_gardiners_skus(bp, [501, 502], price_list_id=7)
     assert result == {501: "34233-58447-07", 502: "24840-41090-04"}
 
 
-def test_skus_returns_none_when_price_list_not_present() -> None:
+def test_skus_returns_none_when_identity_missing() -> None:
     bp = FakeBrightpearl()
-    bp.get_responses["/product-service/product/501/price"] = {
-        "501": [{"priceListId": 1, "sku": "WBYS-INTERNAL"}]
-    }
+    bp.get_responses["/product-service/product/501"] = [{"id": 501}]
     assert q.get_product_gardiners_skus(
         bp, [501], price_list_id=7
     ) == {501: None}
-
-
-def test_skus_accepts_productSku_field_as_alternative() -> None:
-    bp = FakeBrightpearl()
-    bp.get_responses["/product-service/product/501/price"] = {
-        "501": [{"priceListId": 7, "productSku": "ALT-FIELD"}]
-    }
-    assert q.get_product_gardiners_skus(
-        bp, [501], price_list_id=7
-    ) == {501: "ALT-FIELD"}
 
 
 def test_skus_returns_none_for_empty_sku_string() -> None:
     bp = FakeBrightpearl()
-    bp.get_responses["/product-service/product/501/price"] = {
-        "501": [{"priceListId": 7, "sku": "   "}]
-    }
+    bp.get_responses["/product-service/product/501"] = [
+        {"id": 501, "identity": {"sku": "   "}}
+    ]
     assert q.get_product_gardiners_skus(
         bp, [501], price_list_id=7
     ) == {501: None}
+
+
+def test_skus_returns_none_for_unknown_products() -> None:
+    """If Brightpearl omits a product from the response, treat as missing."""
+    bp = FakeBrightpearl()
+    bp.get_responses["/product-service/product/501,502"] = [
+        {"id": 501, "identity": {"sku": "ABC"}},
+    ]
+    result = q.get_product_gardiners_skus(bp, [501, 502], price_list_id=7)
+    assert result == {501: "ABC", 502: None}
 
 
 # ---------------------------------------------------------------------------

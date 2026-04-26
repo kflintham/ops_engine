@@ -100,14 +100,11 @@ def _install_po(
 
 def _install_product_catalog(bp: FakeBrightpearl) -> None:
     bp.get_responses["/product-service/product/501/supplier"] = {
-        "501": [{"supplierId": B1358_ID}]
+        "501": [B1358_ID]
     }
-    bp.get_responses["/product-service/product/501/price"] = {
-        "501": [
-            {"priceListId": 1, "sku": "WBYS-INTERNAL"},
-            {"priceListId": PRICE_LIST_ID, "sku": "34233-58447-07"},
-        ]
-    }
+    bp.get_responses["/product-service/product/501"] = [
+        {"id": 501, "identity": {"sku": "34233-58447-07"}}
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -180,11 +177,11 @@ def test_mapping_failure_records_failure_and_does_not_upload(
     _install_po(bp, 555, ref="PO-555")
     # Product 501 doesn't have B1358 as a supplier -> JIT eligibility fails.
     bp.get_responses["/product-service/product/501/supplier"] = {
-        "501": [{"supplierId": 9999}]
+        "501": [9999]
     }
-    bp.get_responses["/product-service/product/501/price"] = {
-        "501": [{"priceListId": PRICE_LIST_ID, "sku": "ANY"}]
-    }
+    bp.get_responses["/product-service/product/501"] = [
+        {"id": 501, "identity": {"sku": "ANY"}}
+    ]
 
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
 
@@ -249,7 +246,7 @@ def test_one_po_failure_does_not_stop_the_others(
     _install_product_catalog(bp)
     # Product 999 has no catalog info -> mapping fails for PO 666.
     bp.get_responses["/product-service/product/999/supplier"] = {"999": []}
-    bp.get_responses["/product-service/product/999/price"] = {"999": []}
+    bp.get_responses["/product-service/product/999"] = [{"id": 999}]
 
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
 
