@@ -147,6 +147,41 @@ def test_supplier_ids_deduplicates_input_ids() -> None:
 
 
 # ---------------------------------------------------------------------------
+# find_po_id_by_reference
+# ---------------------------------------------------------------------------
+
+
+def test_find_po_id_by_reference_filters_by_supplier() -> None:
+    bp = FakeBrightpearl()
+    bp.get_responses["/order-service/order-search"] = {"results": [[1234]]}
+    ids = q.find_po_id_by_reference(
+        bp, "Test - Katie - FTP", supplier_contact_id=341
+    )
+    assert ids == [1234]
+    path, params = bp.get_calls[0]
+    assert path == "/order-service/order-search"
+    assert params == {
+        "orderTypeCode": "PO",
+        "customerRef": "Test - Katie - FTP",
+        "supplierContactId": 341,
+    }
+
+
+def test_find_po_id_by_reference_omits_supplier_filter_when_not_given() -> None:
+    bp = FakeBrightpearl()
+    bp.get_responses["/order-service/order-search"] = {"results": [[1]]}
+    q.find_po_id_by_reference(bp, "X")
+    _, params = bp.get_calls[0]
+    assert "supplierContactId" not in (params or {})
+
+
+def test_find_po_id_by_reference_returns_empty_for_blank_reference() -> None:
+    bp = FakeBrightpearl()
+    assert q.find_po_id_by_reference(bp, "") == []
+    assert bp.get_calls == []
+
+
+# ---------------------------------------------------------------------------
 # set_order_status
 # ---------------------------------------------------------------------------
 

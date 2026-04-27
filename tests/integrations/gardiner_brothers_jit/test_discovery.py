@@ -118,12 +118,18 @@ def test_discover_returns_complete_result_when_everything_found() -> None:
     bp.responses["/order-service/order-status"] = [
         {"id": 101, "name": "GBR JIT - Request Sent"},
         {"id": 102, "name": "GBR JIT - Pending"},
+        {"id": 132, "name": "GBR JIT - Acknowledged"},
+        {"id": 136, "name": "GBR JIT - Order Fulfilled"},
+        {"id": 134, "name": "GBR JIT - Cancelled"},
     ]
     result = discovery.discover(bp)
     assert result.supplier_contact_id == 4242
     assert result.price_list_id == 7
     assert result.status_id_request_sent == 101
     assert result.status_id_pending == 102
+    assert result.status_id_acknowledged == 132
+    assert result.status_id_order_fulfilled == 136
+    assert result.status_id_cancelled == 134
     assert result.is_complete is True
 
 
@@ -151,12 +157,18 @@ def test_format_env_snippet_complete() -> None:
         price_list_id=7,
         status_id_request_sent=101,
         status_id_pending=102,
+        status_id_acknowledged=132,
+        status_id_order_fulfilled=136,
+        status_id_cancelled=134,
     )
     snippet = discovery.format_env_snippet(result)
     assert "GBR_JIT_SUPPLIER_CONTACT_ID=4242" in snippet
     assert "GBR_JIT_PRICE_LIST_ID=7" in snippet
     assert "GBR_JIT_STATUS_ID_REQUEST_SENT=101" in snippet
     assert "GBR_JIT_STATUS_ID_PENDING=102" in snippet
+    assert "GBR_JIT_STATUS_ID_ACKNOWLEDGED=132" in snippet
+    assert "GBR_JIT_STATUS_ID_ORDER_FULFILLED=136" in snippet
+    assert "GBR_JIT_STATUS_ID_CANCELLED=134" in snippet
 
 
 def test_format_env_snippet_marks_missing_values() -> None:
@@ -165,9 +177,12 @@ def test_format_env_snippet_marks_missing_values() -> None:
         price_list_id=7,
         status_id_request_sent=None,
         status_id_pending=None,
+        status_id_acknowledged=None,
+        status_id_order_fulfilled=None,
+        status_id_cancelled=None,
     )
     snippet = discovery.format_env_snippet(result)
-    assert snippet.count("NOT FOUND") == 3
+    assert snippet.count("NOT FOUND") == 6
     assert "GBR_JIT_PRICE_LIST_ID=7" in snippet
 
 
@@ -190,6 +205,9 @@ def test_discover_lists_price_lists_when_target_not_found() -> None:
     bp.responses["/order-service/order-status"] = [
         {"id": 101, "name": "GBR JIT - Request Sent"},
         {"id": 102, "name": "GBR JIT - Pending"},
+        {"id": 132, "name": "GBR JIT - Acknowledged"},
+        {"id": 136, "name": "GBR JIT - Order Fulfilled"},
+        {"id": 134, "name": "GBR JIT - Cancelled"},
     ]
     result = discovery.discover(bp)
     assert result.price_list_id is None
@@ -205,6 +223,9 @@ def test_format_env_snippet_includes_price_list_candidates_when_missing() -> Non
         price_list_id=None,
         status_id_request_sent=101,
         status_id_pending=102,
+        status_id_acknowledged=132,
+        status_id_order_fulfilled=136,
+        status_id_cancelled=134,
         available_price_lists=(
             (2, "Cost Price GBR Net"),
             (1, "Default"),
@@ -224,6 +245,9 @@ def test_format_env_snippet_includes_status_candidates_when_missing() -> None:
         price_list_id=7,
         status_id_request_sent=None,
         status_id_pending=None,
+        status_id_acknowledged=None,
+        status_id_order_fulfilled=None,
+        status_id_cancelled=None,
         available_order_statuses=(
             (10, "GBR JIT - Pending"),
             (11, "GBR JIT - Request sent"),  # different capitalisation

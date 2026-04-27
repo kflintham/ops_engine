@@ -29,6 +29,9 @@ SUPPLIER_NAME = "Gardiner Bros & Co (B1358)"
 PRICE_LIST_NAME = "Cost Price GBR (Net)"
 STATUS_REQUEST_SENT_NAME = "GBR JIT - Request Sent"
 STATUS_PENDING_NAME = "GBR JIT - Pending"
+STATUS_ACKNOWLEDGED_NAME = "GBR JIT - Acknowledged"
+STATUS_ORDER_FULFILLED_NAME = "GBR JIT - Order Fulfilled"
+STATUS_CANCELLED_NAME = "GBR JIT - Cancelled"
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,9 @@ class DiscoveryResult:
     price_list_id: int | None
     status_id_request_sent: int | None
     status_id_pending: int | None
+    status_id_acknowledged: int | None
+    status_id_order_fulfilled: int | None
+    status_id_cancelled: int | None
     available_price_lists: tuple[tuple[int, str], ...] = ()
     available_order_statuses: tuple[tuple[int, str], ...] = ()
 
@@ -49,6 +55,9 @@ class DiscoveryResult:
                 self.price_list_id,
                 self.status_id_request_sent,
                 self.status_id_pending,
+                self.status_id_acknowledged,
+                self.status_id_order_fulfilled,
+                self.status_id_cancelled,
             )
         )
 
@@ -58,6 +67,9 @@ def discover(bp: BrightpearlClient) -> DiscoveryResult:
     price_list_id = find_price_list_id(bp, PRICE_LIST_NAME)
     status_request = find_order_status_id(bp, STATUS_REQUEST_SENT_NAME)
     status_pending = find_order_status_id(bp, STATUS_PENDING_NAME)
+    status_acknowledged = find_order_status_id(bp, STATUS_ACKNOWLEDGED_NAME)
+    status_order_fulfilled = find_order_status_id(bp, STATUS_ORDER_FULFILLED_NAME)
+    status_cancelled = find_order_status_id(bp, STATUS_CANCELLED_NAME)
 
     # Only fetch the full candidate lists when needed -- saves an API call
     # when everything was found by exact match.
@@ -65,7 +77,16 @@ def discover(bp: BrightpearlClient) -> DiscoveryResult:
     available_order_statuses: tuple[tuple[int, str], ...] = ()
     if price_list_id is None:
         available_price_lists = tuple(list_price_lists(bp))
-    if status_request is None or status_pending is None:
+    if any(
+        s is None
+        for s in (
+            status_request,
+            status_pending,
+            status_acknowledged,
+            status_order_fulfilled,
+            status_cancelled,
+        )
+    ):
         available_order_statuses = tuple(list_order_statuses(bp))
 
     return DiscoveryResult(
@@ -73,6 +94,9 @@ def discover(bp: BrightpearlClient) -> DiscoveryResult:
         price_list_id=price_list_id,
         status_id_request_sent=status_request,
         status_id_pending=status_pending,
+        status_id_acknowledged=status_acknowledged,
+        status_id_order_fulfilled=status_order_fulfilled,
+        status_id_cancelled=status_cancelled,
         available_price_lists=available_price_lists,
         available_order_statuses=available_order_statuses,
     )
@@ -254,6 +278,9 @@ def format_env_snippet(result: DiscoveryResult) -> str:
         f"GBR_JIT_PRICE_LIST_ID={_render(result.price_list_id)}",
         f"GBR_JIT_STATUS_ID_REQUEST_SENT={_render(result.status_id_request_sent)}",
         f"GBR_JIT_STATUS_ID_PENDING={_render(result.status_id_pending)}",
+        f"GBR_JIT_STATUS_ID_ACKNOWLEDGED={_render(result.status_id_acknowledged)}",
+        f"GBR_JIT_STATUS_ID_ORDER_FULFILLED={_render(result.status_id_order_fulfilled)}",
+        f"GBR_JIT_STATUS_ID_CANCELLED={_render(result.status_id_cancelled)}",
     ]
 
     if result.price_list_id is None and result.available_price_lists:
@@ -263,9 +290,18 @@ def format_env_snippet(result: DiscoveryResult) -> str:
             lines.append(f"  {id_:>6}  {name}")
 
     if (
-        result.status_id_request_sent is None
-        or result.status_id_pending is None
-    ) and result.available_order_statuses:
+        any(
+            s is None
+            for s in (
+                result.status_id_request_sent,
+                result.status_id_pending,
+                result.status_id_acknowledged,
+                result.status_id_order_fulfilled,
+                result.status_id_cancelled,
+            )
+        )
+        and result.available_order_statuses
+    ):
         lines.append("")
         lines.append("Available order statuses in your Brightpearl:")
         for id_, name in sorted(result.available_order_statuses):

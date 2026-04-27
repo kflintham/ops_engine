@@ -26,10 +26,17 @@ class GbrJitConfig:
     gardiners_price_list_id: int
     status_id_request_sent: int
     status_id_pending: int
+    # Inbound status transitions, driven by Gardiners notification files.
+    status_id_acknowledged: int
+    status_id_order_fulfilled: int
+    status_id_cancelled: int
 
     # SFTP folder conventions (agree with Gardiners before go-live).
     orders_remote_path: str
     notifications_remote_path: str
+    # Where processed notification files are moved to after we apply them.
+    # Defaults to ``<notifications_remote_path>/processed/``.
+    notifications_processed_path: str = ""
 
     # File naming -- applied to the outbound CSV before upload. Supported
     # placeholders are ``{order_reference}`` and ``{timestamp}``.
@@ -63,6 +70,9 @@ class GbrJitConfig:
         price_list_id = _required_int("PRICE_LIST_ID")
         request_sent = _required_int("STATUS_ID_REQUEST_SENT")
         pending = _required_int("STATUS_ID_PENDING")
+        acknowledged = _required_int("STATUS_ID_ACKNOWLEDGED")
+        order_fulfilled = _required_int("STATUS_ID_ORDER_FULFILLED")
+        cancelled = _required_int("STATUS_ID_CANCELLED")
         orders_path = _required_str("ORDERS_PATH")
         notifications_path = _required_str("NOTIFICATIONS_PATH")
 
@@ -72,13 +82,27 @@ class GbrJitConfig:
             )
 
         template = env.get(f"{_ENV_PREFIX}_FILE_NAME_TEMPLATE") or cls.file_name_template
+        processed_path = (
+            env.get(f"{_ENV_PREFIX}_NOTIFICATIONS_PROCESSED_PATH")
+            or _default_processed_path(notifications_path)
+        )
 
         return cls(
             gardiners_jit_supplier_contact_id=supplier_id,
             gardiners_price_list_id=price_list_id,
             status_id_request_sent=request_sent,
             status_id_pending=pending,
+            status_id_acknowledged=acknowledged,
+            status_id_order_fulfilled=order_fulfilled,
+            status_id_cancelled=cancelled,
             orders_remote_path=orders_path,
             notifications_remote_path=notifications_path,
+            notifications_processed_path=processed_path,
             file_name_template=template,
         )
+
+
+def _default_processed_path(notifications_path: str) -> str:
+    """Default to a 'processed' subfolder of the notifications folder."""
+    base = notifications_path.rstrip("/")
+    return f"{base}/processed/"

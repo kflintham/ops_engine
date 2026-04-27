@@ -18,6 +18,10 @@ Commands:
 - ``outbound``         -- find any POs on ``GBR JIT - Request Sent`` for
                           the JIT supplier, build their CSVs, upload to
                           SFTP, and transition them to ``GBR JIT - Pending``.
+- ``inbound``          -- pick up notification CSVs Gardiners have dropped
+                          into the SFTP notifications folder, transition
+                          the matching POs to Acknowledged / Order
+                          Fulfilled / Cancelled, and archive each file.
 
 All commands read their config from environment variables; see
 ``.env.example`` at the repo root.
@@ -34,6 +38,7 @@ from ops_engine.core.sftp import SftpClient, SftpConfig
 
 from . import discovery
 from .config import GbrJitConfig
+from .inbound import run_inbound
 from .outbound import run_outbound
 from .setup import ensure_remote_folders
 
@@ -109,6 +114,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Send pending GBR JIT purchase orders to Gardiners",
     )
     p_outbound.set_defaults(func=_cmd_outbound)
+
+    p_inbound = sub.add_parser(
+        "inbound",
+        help="Apply Gardiners notifications to Brightpearl PO statuses",
+    )
+    p_inbound.set_defaults(func=_cmd_inbound)
 
     return parser.parse_args(argv)
 
@@ -189,6 +200,29 @@ def _cmd_outbound(_args: argparse.Namespace) -> int:
         )
     for fail in summary.failures:
         sys.stderr.write(f"FAIL PO {fail.order_id}: {fail.error}\n")
+
+    return 0 if not summary.failures else 1
+
+
+def _cmd_inbound(_args: argparse.Namespace) -> int:
+    cfg = GbrJitConfig.from_env()
+    bp_cfg = BrightpearlConfig.from_env()
+    sftp_cfg = SftpConfig.from_env(prefix=_SFTP_PREFIX)
+
+    bp = BrightpearlClient(bp_cfg)
+    with SftpClient(sftp_cfg) as sftp:
+        summary = run_inbound(bp, sftp, cfg)
+
+    for ok in summary.successes:
+        if ok.transitions:
+            for ref, po_id, status_id in ok.transitions:
+                sys.stdout.write(
+                    f"OK   {ok.filename}: PO {po_id} (ref={ref}) -> status {status_id}\n"
+                )
+        else:
+            sys.stdout.write(f"OK   {ok.filename}: no transitions\n")
+    for fail in summary.failures:
+        sys.stderr.write(f"FAIL {fail.filename}: {fail.error}\n")
 
     return 0 if not summary.failures else 1
 

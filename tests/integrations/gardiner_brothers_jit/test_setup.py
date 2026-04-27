@@ -39,6 +39,9 @@ def config() -> GbrJitConfig:
         gardiners_price_list_id=7,
         status_id_request_sent=101,
         status_id_pending=102,
+        status_id_acknowledged=132,
+        status_id_order_fulfilled=136,
+        status_id_cancelled=134,
         orders_remote_path="/JIT/Orders/",
         notifications_remote_path="/JIT/Notifications/",
     )

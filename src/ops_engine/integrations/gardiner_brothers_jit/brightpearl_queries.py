@@ -104,6 +104,33 @@ def get_product_supplier_ids(
     return result
 
 
+def find_po_id_by_reference(
+    bp: BrightpearlClient,
+    reference: str,
+    *,
+    supplier_contact_id: int | None = None,
+) -> list[int]:
+    """Find purchase order IDs whose customer reference matches ``reference``.
+
+    Brightpearl's order-search returns the same shape as the JIT search
+    above. We filter on orderTypeCode=PO and (optionally) the supplier
+    contact so cross-supplier ref collisions don't pull in the wrong PO.
+
+    Returns a list because the search is theoretically multi-result; the
+    caller decides what to do if more than one matches.
+    """
+    if not reference:
+        return []
+    params: dict[str, Any] = {
+        "orderTypeCode": "PO",
+        "customerRef": reference,
+    }
+    if supplier_contact_id is not None:
+        params["supplierContactId"] = supplier_contact_id
+    response = bp.get("/order-service/order-search", params=params)
+    return _extract_order_ids(response)
+
+
 def set_order_status(
     bp: BrightpearlClient, order_id: int, *, status_id: int
 ) -> None:
