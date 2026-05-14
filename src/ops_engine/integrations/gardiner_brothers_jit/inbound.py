@@ -160,7 +160,49 @@ def _apply_status_transition(
         order_ref,
         new_status_id,
     )
+
+    note_text = _format_consignment_note(events)
+    if note_text:
+        try:
+            queries.add_order_note(bp, po_id, text=note_text)
+            _LOGGER.info("Added consignment note to PO %s", po_id)
+        except Exception as exc:  # noqa: BLE001 -- non-fatal
+            _LOGGER.warning(
+                "Could not add consignment note to PO %s: %s", po_id, exc
+            )
+
     return (order_ref, po_id, new_status_id)
+
+
+def _format_consignment_note(events: list[NotificationEvent]) -> str | None:
+    """Format a PO note from any consignment data in the events.
+
+    Returns None when no event in the group carries consignment info.
+    Dedupes identical consignments so a multi-line shipment with the same
+    carrier+reference+url doesn't repeat itself in the note.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    blocks: list[str] = []
+    for event in events:
+        if event.consignment is None:
+            continue
+        c = event.consignment
+        key = (c.carrier, c.reference, c.tracking_url)
+        if key in seen:
+            continue
+        seen.add(key)
+        parts: list[str] = []
+        if c.carrier:
+            parts.append(f"  Carrier: {c.carrier}")
+        if c.reference:
+            parts.append(f"  Consignment: {c.reference}")
+        if c.tracking_url:
+            parts.append(f"  Tracking: {c.tracking_url}")
+        if parts:
+            blocks.append("\n".join(parts))
+    if not blocks:
+        return None
+    return "Gardiners despatch:\n" + "\n".join(blocks)
 
 
 def _decide_status_id(

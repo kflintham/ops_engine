@@ -21,3 +21,13 @@ env/
 *.local.yml
 *.local.env
 .env
+
+# macOS metadata (do not commit)
+.DS_Store
+
+# Backup files from sed/expand
+*.bak
+*.bak2
+
+# Local env file with secrets (do not commit)
+.env.local

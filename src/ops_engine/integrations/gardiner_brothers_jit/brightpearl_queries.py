@@ -191,3 +191,18 @@ def _csv_ids(ids: list[int]) -> str:
             seen.add(i)
             unique.append(i)
     return ",".join(str(i) for i in unique)
+
+
+
+
+
+def add_order_note(bp: BrightpearlClient, order_id: int, *, text: str) -> None:
+    """Attach a note to a PO. The note appears in the order's activity log.
+
+    Endpoint: ``POST /order-service/order/{id}/note`` with body
+    ``{"text": "..."}``. Verified live on the WBYS Brightpearl account.
+    """
+    bp.post(
+        f"/order-service/order/{order_id}/note",
+        json={"text": text},
+    )
