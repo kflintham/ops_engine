@@ -60,6 +60,9 @@ def get_order(bp: BrightpearlClient, order_id: int) -> Mapping[str, Any]:
     return response
 
 
+_SUPPLIER_BATCH_SIZE = 50
+
+
 def get_product_supplier_ids(
     bp: BrightpearlClient, product_ids: list[int]
 ) -> dict[int, list[int]]:
@@ -69,13 +72,29 @@ def get_product_supplier_ids(
     returns a dict keyed by product ID; the value is either a list of plain
     integer contact IDs (the common shape) or a list of objects with a
     ``supplierId`` / ``contactId`` field. Both shapes are handled.
+
+    Product IDs are batched into groups of 50 to stay safely under
+    Brightpearl's URL-length limit on multi-ID GET paths -- large POs
+    can otherwise produce a 400 with code CMNC-006.
     """
     if not product_ids:
         return {}
-    path = f"/product-service/product/{_csv_ids(product_ids)}/supplier"
-    response = bp.get(path) or {}
+
+    # De-duplicate, preserve order.
+    seen: set[int] = set()
+    unique_ids: list[int] = []
+    for pid in product_ids:
+        if pid not in seen:
+            seen.add(pid)
+            unique_ids.append(pid)
+
     result: dict[int, list[int]] = {}
-    if isinstance(response, Mapping):
+    for offset in range(0, len(unique_ids), _SUPPLIER_BATCH_SIZE):
+        batch = unique_ids[offset : offset + _SUPPLIER_BATCH_SIZE]
+        path = f"/product-service/product/{_csv_ids(batch)}/supplier"
+        response = bp.get(path) or {}
+        if not isinstance(response, Mapping):
+            continue
         for product_id_str, entries in response.items():
             product_id = _as_int(product_id_str)
             supplier_ids: list[int] = []
@@ -99,10 +118,10 @@ def get_product_supplier_ids(
                             except ValueError:
                                 continue
             result[product_id] = supplier_ids
-    for product_id in product_ids:
+
+    for product_id in unique_ids:
         result.setdefault(product_id, [])
     return result
-
 
 def find_po_id_by_reference(
     bp: BrightpearlClient,
@@ -183,14 +202,9 @@ def _as_int(value: Any) -> int:
 
 
 def _csv_ids(ids: list[int]) -> str:
-    # de-duplicate while preserving order
-    seen: set[int] = set()
-    unique: list[int] = []
-    for i in ids:
-        if i not in seen:
-            seen.add(i)
-            unique.append(i)
-    return ",".join(str(i) for i in unique)
+    # De-duplicate and sort ascending; Brightpearl rejects multi-ID paths
+    # whose IDs are not in ascending order (CMNC-006 'is not in order').
+    return ",".join(str(i) for i in sorted(set(ids)))
 
 
 
