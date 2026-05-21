@@ -116,41 +116,11 @@ def _send_one(
 def _build_order(
     bp: BrightpearlClient, po: Mapping[str, object], config: GbrJitConfig
 ) -> Order:
-    product_ids = _product_ids_for(po)
-    supplier_map = queries.get_product_supplier_ids(bp, product_ids)
     try:
-        return build_order_from_po(
-            po,
-            product_supplier_ids=supplier_map,
-            required_supplier_contact_id=config.gardiners_jit_supplier_contact_id,
-        )
+        return build_order_from_po(po)
     except GbrJitMappingError:
         # Re-raise as-is; the orchestrator's outer catch logs + records it.
         raise
-
-
-def _product_ids_for(po: Mapping[str, object]) -> list[int]:
-    rows = po.get("orderRows")
-    product_ids: list[int] = []
-    iterable: list[Mapping[str, object]] = []
-    if isinstance(rows, Mapping):
-        iterable = [r for r in rows.values() if isinstance(r, Mapping)]
-    elif isinstance(rows, list):
-        iterable = [r for r in rows if isinstance(r, Mapping)]
-    for row in iterable:
-        raw = row.get("productId")
-        try:
-            product_ids.append(int(raw))  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            continue
-    # de-duplicate, preserve order
-    seen: set[int] = set()
-    unique: list[int] = []
-    for pid in product_ids:
-        if pid not in seen:
-            seen.add(pid)
-            unique.append(pid)
-    return unique
 
 
 def _remote_path(config: GbrJitConfig, order: Order, clock: ClockFn) -> str:

@@ -14,12 +14,6 @@ from ops_engine.integrations.gardiner_brothers_jit.po_mapper import (
 )
 
 
-# Brightpearl test IDs used throughout. B1358_ID stands in for whatever
-# numeric contact ID 'Gardiner Bros & Co (B1358)' actually has in BP.
-B1358_ID = 4242
-B3116_DF_ID = 9999  # the dropship account; must never satisfy the filter
-
-
 def _po_with_rows_as_dict() -> dict[str, Any]:
     """Mirrors the shape Brightpearl actually returns for orderRows."""
     return {
@@ -61,11 +55,7 @@ def _po_with_rows_as_list() -> dict[str, Any]:
 
 
 def test_builds_order_when_all_validations_pass() -> None:
-    order = build_order_from_po(
-        _po_with_rows_as_dict(),
-        product_supplier_ids={501: [B1358_ID, B3116_DF_ID], 502: [B1358_ID]},
-        required_supplier_contact_id=B1358_ID,
-    )
+    order = build_order_from_po(_po_with_rows_as_dict())
     assert order == Order(
         reference="12346",
         lines=(
@@ -76,11 +66,7 @@ def test_builds_order_when_all_validations_pass() -> None:
 
 
 def test_prefers_po_ref_over_numeric_id_when_set() -> None:
-    order = build_order_from_po(
-        _po_with_rows_as_list(),
-        product_supplier_ids={501: [B1358_ID]},
-        required_supplier_contact_id=B1358_ID,
-    )
+    order = build_order_from_po(_po_with_rows_as_list())
     assert order.reference == "PO-Alpha"
     assert order.lines[0].line_reference == "777-1"
 
@@ -90,20 +76,12 @@ def test_accepts_reference_field_as_alias_for_ref() -> None:
     po = _po_with_rows_as_list()
     del po["ref"]
     po["reference"] = "Test - Katie - FTP"
-    order = build_order_from_po(
-        po,
-        product_supplier_ids={501: [B1358_ID]},
-        required_supplier_contact_id=B1358_ID,
-    )
+    order = build_order_from_po(po)
     assert order.reference == "Test - Katie - FTP"
 
 
 def test_handles_order_rows_as_list() -> None:
-    order = build_order_from_po(
-        _po_with_rows_as_list(),
-        product_supplier_ids={501: [B1358_ID]},
-        required_supplier_contact_id=B1358_ID,
-    )
+    order = build_order_from_po(_po_with_rows_as_list())
     assert order.lines[0].quantity == 2
 
 
@@ -111,40 +89,9 @@ def test_strips_whitespace_from_ref_and_sku() -> None:
     po = _po_with_rows_as_list()
     po["ref"] = "  PO-Alpha  "
     po["orderRows"][0]["productSku"] = "  SKU-1  "
-    order = build_order_from_po(
-        po,
-        product_supplier_ids={501: [B1358_ID]},
-        required_supplier_contact_id=B1358_ID,
-    )
+    order = build_order_from_po(po)
     assert order.reference == "PO-Alpha"
     assert order.lines[0].sku == "SKU-1"
-
-
-# ---------------------------------------------------------------------------
-# JIT eligibility rule
-# ---------------------------------------------------------------------------
-
-
-def test_rejects_po_when_product_missing_jit_supplier() -> None:
-    po = _po_with_rows_as_list()
-    with pytest.raises(GbrJitMappingError) as excinfo:
-        build_order_from_po(
-            po,
-            product_supplier_ids={501: [B3116_DF_ID]},  # DF only, no JIT
-            required_supplier_contact_id=B1358_ID,
-        )
-    assert "does not list supplier" in str(excinfo.value)
-    assert "4242" in str(excinfo.value)
-
-
-def test_rejects_po_when_no_supplier_info_available() -> None:
-    po = _po_with_rows_as_list()
-    with pytest.raises(GbrJitMappingError, match="no supplier information"):
-        build_order_from_po(
-            po,
-            product_supplier_ids={},  # nothing known about product 501
-            required_supplier_contact_id=B1358_ID,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -156,35 +103,24 @@ def test_rejects_row_when_productSku_missing() -> None:
     po = _po_with_rows_as_list()
     del po["orderRows"][0]["productSku"]
     with pytest.raises(GbrJitMappingError, match="missing productSku"):
-        build_order_from_po(
-            po,
-            product_supplier_ids={501: [B1358_ID]},
-            required_supplier_contact_id=B1358_ID,
-        )
+        build_order_from_po(po)
 
 
 def test_rejects_row_when_productSku_blank() -> None:
     po = _po_with_rows_as_list()
     po["orderRows"][0]["productSku"] = "   "
     with pytest.raises(GbrJitMappingError, match="missing productSku"):
-        build_order_from_po(
-            po,
-            product_supplier_ids={501: [B1358_ID]},
-            required_supplier_contact_id=B1358_ID,
-        )
+        build_order_from_po(po)
 
 
 def test_aggregates_multiple_errors_across_lines() -> None:
     po = _po_with_rows_as_dict()
     po["orderRows"]["102"]["productSku"] = ""  # second line has no SKU
+    del po["orderRows"]["101"]["quantity"]  # first line has no quantity
     with pytest.raises(GbrJitMappingError) as excinfo:
-        build_order_from_po(
-            po,
-            product_supplier_ids={501: [B3116_DF_ID], 502: [B1358_ID]},
-            required_supplier_contact_id=B1358_ID,
-        )
+        build_order_from_po(po)
     msg = str(excinfo.value)
-    assert "product 501" in msg
+    assert "row 101" in msg
     assert "row 102" in msg
 
 
@@ -196,11 +132,7 @@ def test_aggregates_multiple_errors_across_lines() -> None:
 def test_quantity_accepts_brightpearl_decimal_strings() -> None:
     po = _po_with_rows_as_list()
     po["orderRows"][0]["quantity"] = {"magnitude": "5.000000"}
-    order = build_order_from_po(
-        po,
-        product_supplier_ids={501: [B1358_ID]},
-        required_supplier_contact_id=B1358_ID,
-    )
+    order = build_order_from_po(po)
     assert order.lines[0].quantity == 5
 
 
@@ -208,44 +140,28 @@ def test_quantity_rejects_fractional_values() -> None:
     po = _po_with_rows_as_list()
     po["orderRows"][0]["quantity"] = {"magnitude": "1.5"}
     with pytest.raises(GbrJitMappingError, match="not an integer"):
-        build_order_from_po(
-            po,
-            product_supplier_ids={501: [B1358_ID]},
-            required_supplier_contact_id=B1358_ID,
-        )
+        build_order_from_po(po)
 
 
 def test_quantity_rejects_non_numeric_value() -> None:
     po = _po_with_rows_as_list()
     po["orderRows"][0]["quantity"] = {"magnitude": "abc"}
     with pytest.raises(GbrJitMappingError, match="not a number"):
-        build_order_from_po(
-            po,
-            product_supplier_ids={501: [B1358_ID]},
-            required_supplier_contact_id=B1358_ID,
-        )
+        build_order_from_po(po)
 
 
 def test_quantity_rejects_zero_or_negative() -> None:
     po = _po_with_rows_as_list()
     po["orderRows"][0]["quantity"] = {"magnitude": "0"}
     with pytest.raises(GbrJitMappingError, match="must be positive"):
-        build_order_from_po(
-            po,
-            product_supplier_ids={501: [B1358_ID]},
-            required_supplier_contact_id=B1358_ID,
-        )
+        build_order_from_po(po)
 
 
 def test_quantity_rejects_missing_field() -> None:
     po = _po_with_rows_as_list()
     del po["orderRows"][0]["quantity"]
     with pytest.raises(GbrJitMappingError, match="missing quantity.magnitude"):
-        build_order_from_po(
-            po,
-            product_supplier_ids={501: [B1358_ID]},
-            required_supplier_contact_id=B1358_ID,
-        )
+        build_order_from_po(po)
 
 
 # ---------------------------------------------------------------------------
@@ -255,17 +171,9 @@ def test_quantity_rejects_missing_field() -> None:
 
 def test_rejects_po_with_no_order_rows_field() -> None:
     with pytest.raises(GbrJitMappingError, match="no orderRows"):
-        build_order_from_po(
-            {"id": 1},
-            product_supplier_ids={},
-            required_supplier_contact_id=B1358_ID,
-        )
+        build_order_from_po({"id": 1})
 
 
 def test_rejects_po_with_empty_order_rows() -> None:
     with pytest.raises(GbrJitMappingError, match="no order lines"):
-        build_order_from_po(
-            {"id": 1, "orderRows": []},
-            product_supplier_ids={},
-            required_supplier_contact_id=B1358_ID,
-        )
+        build_order_from_po({"id": 1, "orderRows": []})

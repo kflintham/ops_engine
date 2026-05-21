@@ -1,10 +1,9 @@
 """Map a Brightpearl purchase-order payload into an :class:`Order`.
 
 This module is pure: no HTTP, no SFTP, no env vars. It takes a Brightpearl
-PO dict plus a pre-fetched product->supplier map and produces an
-:class:`Order` ready for :func:`build_order_csv`, or raises
-:class:`GbrJitMappingError` with a clear message if the PO violates any of
-the JIT business rules recorded in ``docs/gardiner-brothers-jit/field-mapping.md``.
+PO dict and produces an :class:`Order` ready for :func:`build_order_csv`,
+or raises :class:`GbrJitMappingError` with a clear message if the PO is
+structurally unusable (missing SKU on a line, missing quantity, etc.).
 
 Verified Brightpearl response shapes (from a real PO on the WBYS account):
 
@@ -18,6 +17,13 @@ Verified Brightpearl response shapes (from a real PO on the WBYS account):
   PO's price list. Used directly as the Gardiners SKU.
 - ``row["quantity"]["magnitude"]`` -- quantity as a string decimal,
   e.g. ``"2.0000"``.
+
+JIT eligibility note: we deliberately do NOT check each product's
+Suppliers tab for Gardiner Bros & Co (B1358) here. The PO's supplier
+choice is the source of truth -- if Purchasing raised the PO against
+B1358, the lines are intended for B1358. If a SKU is genuinely unknown
+to Gardiners' system, they reply with a Cancelled notification which
+the inbound pipeline applies as a status transition.
 """
 from __future__ import annotations
 
@@ -31,12 +37,7 @@ class GbrJitMappingError(Exception):
     """Raised when a Brightpearl PO cannot be mapped into a JIT order."""
 
 
-def build_order_from_po(
-    po: Mapping[str, Any],
-    *,
-    product_supplier_ids: Mapping[int, list[int]],
-    required_supplier_contact_id: int,
-) -> Order:
+def build_order_from_po(po: Mapping[str, Any]) -> Order:
     po_id = _require_int(po, "id")
     reference = _order_reference(po)
     rows = _iter_order_rows(po)
@@ -45,13 +46,7 @@ def build_order_from_po(
     errors: list[str] = []
 
     for row_id, row in rows:
-        product_id = _require_int(row, "productId", ctx=f"row {row_id}")
         try:
-            _assert_product_has_supplier(
-                product_id,
-                product_supplier_ids,
-                required_supplier_contact_id,
-            )
             sku = _resolve_row_sku(row, ctx=f"row {row_id}")
             quantity = _parse_quantity(row, ctx=f"row {row_id}")
         except GbrJitMappingError as exc:
@@ -109,23 +104,6 @@ def _iter_order_rows(
             f"orderRows has unexpected type {type(raw).__name__}"
         )
     return rows
-
-
-def _assert_product_has_supplier(
-    product_id: int,
-    product_supplier_ids: Mapping[int, list[int]],
-    required_supplier_contact_id: int,
-) -> None:
-    supplier_ids = product_supplier_ids.get(product_id)
-    if supplier_ids is None:
-        raise GbrJitMappingError(
-            f"product {product_id} has no supplier information available"
-        )
-    if required_supplier_contact_id not in supplier_ids:
-        raise GbrJitMappingError(
-            f"product {product_id} does not list supplier "
-            f"{required_supplier_contact_id} (Gardiner Bros JIT, B1358)"
-        )
 
 
 def _resolve_row_sku(row: Mapping[str, Any], *, ctx: str) -> str:

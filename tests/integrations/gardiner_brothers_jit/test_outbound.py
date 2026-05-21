@@ -113,12 +113,6 @@ def _install_po(
     bp.get_responses[f"/order-service/order/{order_id}"] = po
 
 
-def _install_product_catalog(bp: FakeBrightpearl) -> None:
-    bp.get_responses["/product-service/product/501/supplier"] = {
-        "501": [B1358_ID]
-    }
-
-
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
@@ -129,7 +123,6 @@ def test_sends_one_po_and_transitions_status(
 ) -> None:
     bp.get_responses["/order-service/order-search"] = {"results": [[555]]}
     _install_po(bp, 555, ref="PO-555")
-    _install_product_catalog(bp)
 
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
 
@@ -169,7 +162,6 @@ def test_falls_back_to_numeric_order_id_when_ref_missing(
 ) -> None:
     bp.get_responses["/order-service/order-search"] = {"results": [[555]]}
     _install_po(bp, 555, ref=None)
-    _install_product_catalog(bp)
 
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
 
@@ -186,17 +178,26 @@ def test_mapping_failure_records_failure_and_does_not_upload(
     bp: FakeBrightpearl, sftp: FakeSftp, config: GbrJitConfig
 ) -> None:
     bp.get_responses["/order-service/order-search"] = {"results": [[555]]}
-    _install_po(bp, 555, ref="PO-555")
-    # Product 501 doesn't have B1358 as a supplier -> JIT eligibility fails.
-    bp.get_responses["/product-service/product/501/supplier"] = {
-        "501": [9999]
-    }
+    # PO with a line missing productSku -> mapping error.
+    _install_po(
+        bp,
+        555,
+        ref="PO-555",
+        rows=[
+            {
+                "id": 1,
+                "productId": 501,
+                "productSku": "",  # blank -> rejected
+                "quantity": {"magnitude": "1"},
+            }
+        ],
+    )
 
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
 
     assert summary.successes == []
     assert len(summary.failures) == 1
-    assert "does not list supplier" in (summary.failures[0].error or "")
+    assert "missing productSku" in (summary.failures[0].error or "")
     assert sftp.files == {}
     # PO status was NOT transitioned -- it stays on Request Sent for retry.
     assert not any(
@@ -209,7 +210,6 @@ def test_sftp_failure_leaves_po_on_request_sent(
 ) -> None:
     bp.get_responses["/order-service/order-search"] = {"results": [[555]]}
     _install_po(bp, 555, ref="PO-555")
-    _install_product_catalog(bp)
     sftp.fail_paths.add("/JIT/Orders/PO-555-202604240930.csv")
 
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
@@ -226,7 +226,6 @@ def test_status_update_failure_is_recorded_but_upload_still_happened(
 ) -> None:
     bp.get_responses["/order-service/order-search"] = {"results": [[555]]}
     _install_po(bp, 555, ref="PO-555")
-    _install_product_catalog(bp)
     bp.fail_status_update_for(555)
 
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
@@ -254,14 +253,11 @@ def test_one_po_failure_does_not_stop_the_others(
             {
                 "id": 1,
                 "productId": 999,
-                "productSku": "X",
+                "productSku": "",  # blank -> mapping fails for PO 666
                 "quantity": {"magnitude": "1"},
             }
         ],
     )
-    _install_product_catalog(bp)
-    # Product 999 has no catalog info -> mapping fails for PO 666.
-    bp.get_responses["/product-service/product/999/supplier"] = {"999": []}
 
     summary = run_outbound(bp, sftp, config, now=lambda: FIXED_NOW)
 
