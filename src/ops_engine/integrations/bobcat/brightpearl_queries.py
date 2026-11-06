@@ -39,10 +39,10 @@ DEFAULT_CORRECTION_REASON = 1
 
 
 # Number of SKUs to pack into one product-search call. Brightpearl's
-# product-search supports pipe-separated OR values on a column filter.
-# Too many at once overflows the URL; too few burns requests (and gets
-# us rate-limited). 50 is a safe middle ground.
-PRODUCT_SEARCH_SKU_BATCH_SIZE = 50
+# product-search supports pipe-separated OR values on a column filter,
+# but caps the whole query string at 512 characters (GWYC-037). Bobcat
+# SKUs are ~14 chars each, so 25 per batch keeps us safely under that.
+PRODUCT_SEARCH_SKU_BATCH_SIZE = 25
 
 
 def search_product_ids_by_sku(
