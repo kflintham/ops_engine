@@ -233,17 +233,27 @@ def test_list_warehouse_product_ids_handles_empty() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_apply_stock_correction_posts_positive_delta() -> None:
-    bp = FakeBrightpearl()
-    queries.apply_stock_correction(
-        bp,
-        warehouse_id=14,
-        location_id=27,
+def _correction(**overrides: Any) -> queries.StockCorrection:
+    base = dict(
         product_id=500,
+        location_id=27,
         quantity_delta=10,
         cost_value="54.79",
-        currency_code="GBP",
-        note="test",
+        currency="GBP",
+    )
+    base.update(overrides)
+    return queries.StockCorrection(**base)
+
+
+def test_apply_stock_corrections_posts_the_whole_batch() -> None:
+    bp = FakeBrightpearl()
+    queries.apply_stock_corrections(
+        bp,
+        warehouse_id=14,
+        corrections=[
+            _correction(product_id=500, quantity_delta=10, note="test"),
+            _correction(product_id=501, quantity_delta=-3, note="test"),
+        ],
     )
     assert bp.post_calls == [
         (
@@ -254,39 +264,60 @@ def test_apply_stock_correction_posts_positive_delta() -> None:
                         "quantity": 10,
                         "productId": 500,
                         "locationId": 27,
-                        "cost": {"value": "54.79", "currencyCode": "GBP"},
+                        "cost": {"value": "54.79", "currency": "GBP"},
                         "reason": queries.DEFAULT_CORRECTION_REASON,
                         "reference": "test",
-                    }
+                    },
+                    {
+                        "quantity": -3,
+                        "productId": 501,
+                        "locationId": 27,
+                        "cost": {"value": "54.79", "currency": "GBP"},
+                        "reason": queries.DEFAULT_CORRECTION_REASON,
+                        "reference": "test",
+                    },
                 ]
             },
         )
     ]
 
 
-def test_apply_stock_correction_posts_negative_delta() -> None:
+def test_apply_stock_corrections_drops_zero_delta_entries() -> None:
     bp = FakeBrightpearl()
-    queries.apply_stock_correction(
+    queries.apply_stock_corrections(
         bp,
         warehouse_id=14,
-        location_id=27,
-        product_id=500,
-        quantity_delta=-7,
-        cost_value="54.79",
-        currency_code="GBP",
+        corrections=[
+            _correction(product_id=500, quantity_delta=0),
+            _correction(product_id=501, quantity_delta=5),
+        ],
     )
-    assert bp.post_calls[0][1]["corrections"][0]["quantity"] == -7
+    posted = bp.post_calls[0][1]["corrections"]
+    assert [c["productId"] for c in posted] == [501]
 
 
-def test_apply_stock_correction_zero_delta_is_noop() -> None:
+def test_apply_stock_corrections_empty_or_all_zero_is_noop() -> None:
     bp = FakeBrightpearl()
-    queries.apply_stock_correction(
+    queries.apply_stock_corrections(bp, warehouse_id=14, corrections=[])
+    queries.apply_stock_corrections(
         bp,
         warehouse_id=14,
-        location_id=27,
-        product_id=500,
-        quantity_delta=0,
-        cost_value="54.79",
-        currency_code="GBP",
+        corrections=[_correction(quantity_delta=0)],
     )
     assert bp.post_calls == []
+
+
+def test_apply_stock_corrections_splits_into_batches() -> None:
+    bp = FakeBrightpearl()
+    total = queries.STOCK_CORRECTION_BATCH_SIZE * 2 + 5
+    corrections = [
+        _correction(product_id=pid, quantity_delta=1)
+        for pid in range(1, total + 1)
+    ]
+    queries.apply_stock_corrections(
+        bp, warehouse_id=14, corrections=corrections
+    )
+    # 50 + 50 + 5 = 3 POSTs.
+    assert len(bp.post_calls) == 3
+    assert len(bp.post_calls[0][1]["corrections"]) == queries.STOCK_CORRECTION_BATCH_SIZE
+    assert len(bp.post_calls[-1][1]["corrections"]) == 5

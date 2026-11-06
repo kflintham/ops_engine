@@ -21,6 +21,7 @@ first and POST the delta needed to reach the target.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from ops_engine.core.brightpearl import BrightpearlClient
@@ -153,19 +154,31 @@ def list_warehouse_product_ids(
     return ids
 
 
-def apply_stock_correction(
+@dataclass(frozen=True)
+class StockCorrection:
+    """One line in a batched stock-correction POST."""
+
+    product_id: int
+    location_id: int
+    quantity_delta: int
+    cost_value: str
+    currency: str
+    reason_id: int = DEFAULT_CORRECTION_REASON
+    note: str = ""
+
+
+# Brightpearl accepts many corrections in one POST. Keeping the batch
+# modest avoids hitting their rate limits and keeps request bodies sane.
+STOCK_CORRECTION_BATCH_SIZE = 50
+
+
+def apply_stock_corrections(
     bp: BrightpearlClient,
     *,
     warehouse_id: int,
-    location_id: int,
-    product_id: int,
-    quantity_delta: int,
-    cost_value: str,
-    currency_code: str,
-    reason_id: int = DEFAULT_CORRECTION_REASON,
-    note: str = "",
+    corrections: list[StockCorrection],
 ) -> None:
-    """Apply a signed quantity correction to one product in one warehouse.
+    """POST a batch of stock corrections to one warehouse.
 
     Endpoint: ``POST /warehouse-service/warehouse/{wh}/stock-correction``
     with a body shaped like::
@@ -175,38 +188,40 @@ def apply_stock_correction(
                 "quantity": <delta>,
                 "productId": <pid>,
                 "locationId": <locId>,
-                "cost": {"value": "<GBP cost>", "currencyCode": "GBP"},
+                "cost": {"value": "<GBP cost>", "currency": "GBP"},
                 "reason": <reasonId>,
                 "reference": "<note>"
-            }
+            },
+            ...
         ]}
 
-    Brightpearl requires both a locationId (shelf/bin inside the
-    warehouse) and a per-unit cost value+currency on every correction, so
-    both are mandatory here. A positive delta adds stock, a negative
-    delta removes it.
+    Brightpearl requires locationId and cost (value + currency) on every
+    correction. Zero-delta entries are dropped before send. The list is
+    split into batches of ``STOCK_CORRECTION_BATCH_SIZE`` so a large
+    sync doesn't trigger 503s.
     """
-    if quantity_delta == 0:
+    non_zero = [c for c in corrections if c.quantity_delta != 0]
+    if not non_zero:
         return
-    body = {
-        "corrections": [
-            {
-                "quantity": quantity_delta,
-                "productId": product_id,
-                "locationId": location_id,
-                "cost": {
-                    "value": cost_value,
-                    "currencyCode": currency_code,
-                },
-                "reason": reason_id,
-                "reference": note,
-            }
-        ]
-    }
-    bp.post(
-        f"/warehouse-service/warehouse/{warehouse_id}/stock-correction",
-        json=body,
-    )
+    for offset in range(0, len(non_zero), STOCK_CORRECTION_BATCH_SIZE):
+        batch = non_zero[offset : offset + STOCK_CORRECTION_BATCH_SIZE]
+        body = {
+            "corrections": [
+                {
+                    "quantity": c.quantity_delta,
+                    "productId": c.product_id,
+                    "locationId": c.location_id,
+                    "cost": {"value": c.cost_value, "currency": c.currency},
+                    "reason": c.reason_id,
+                    "reference": c.note,
+                }
+                for c in batch
+            ]
+        }
+        bp.post(
+            f"/warehouse-service/warehouse/{warehouse_id}/stock-correction",
+            json=body,
+        )
 
 
 # ---------------------------------------------------------------------------

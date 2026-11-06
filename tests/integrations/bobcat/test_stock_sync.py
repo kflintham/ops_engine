@@ -166,7 +166,7 @@ def test_sync_updates_stock_for_in_stock_sku(config: BobcatConfig) -> None:
             "quantity": 10,
             "productId": 500,
             "locationId": LOCATION_ID,
-            "cost": {"value": "54.79", "currencyCode": "GBP"},
+            "cost": {"value": "54.79", "currency": "GBP"},
             "reason": 1,
             "reference": "Bobcat daily stock feed",
         }
