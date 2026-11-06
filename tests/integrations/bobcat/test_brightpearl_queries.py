@@ -34,27 +34,21 @@ class FakeBrightpearl:
 # ---------------------------------------------------------------------------
 
 
+def _search_response_for(rows: list[tuple[int, str]]) -> dict[str, Any]:
+    return {
+        "metaData": {
+            "columns": [{"name": "productId"}, {"name": "SKU"}]
+        },
+        "results": [[pid, sku] for pid, sku in rows],
+    }
+
+
 def test_search_product_ids_returns_mapping() -> None:
     bp = FakeBrightpearl(
         get_responses={
-            "/product-service/product-search?SKU=A": {
-                "metaData": {
-                    "columns": [
-                        {"name": "productId"},
-                        {"name": "SKU"},
-                    ]
-                },
-                "results": [[500, "A"]],
-            },
-            "/product-service/product-search?SKU=B": {
-                "metaData": {
-                    "columns": [
-                        {"name": "productId"},
-                        {"name": "SKU"},
-                    ]
-                },
-                "results": [[501, "B"]],
-            },
+            "/product-service/product-search?SKU=A|B": _search_response_for(
+                [(500, "A"), (501, "B")]
+            ),
         }
     )
     result = queries.search_product_ids_by_sku(bp, ["A", "B"])
@@ -64,16 +58,9 @@ def test_search_product_ids_returns_mapping() -> None:
 def test_search_product_ids_skips_unknown() -> None:
     bp = FakeBrightpearl(
         get_responses={
-            "/product-service/product-search?SKU=A": {
-                "metaData": {
-                    "columns": [
-                        {"name": "productId"},
-                        {"name": "SKU"},
-                    ]
-                },
-                "results": [[500, "A"]],
-            },
-            # Nothing for SKU=B
+            "/product-service/product-search?SKU=A|B": _search_response_for(
+                [(500, "A")]
+            ),
         }
     )
     result = queries.search_product_ids_by_sku(bp, ["A", "B"])
@@ -81,18 +68,13 @@ def test_search_product_ids_skips_unknown() -> None:
 
 
 def test_search_product_ids_requires_exact_sku_match() -> None:
-    # Brightpearl search is substring-ish; our wrapper must filter to exact.
+    # Brightpearl's OR filter can match a different SKU in the same row
+    # pattern; our wrapper filters results back to the SKUs we asked for.
     bp = FakeBrightpearl(
         get_responses={
-            "/product-service/product-search?SKU=A": {
-                "metaData": {
-                    "columns": [
-                        {"name": "productId"},
-                        {"name": "SKU"},
-                    ]
-                },
-                "results": [[500, "A-SIMILAR"]],
-            },
+            "/product-service/product-search?SKU=A": _search_response_for(
+                [(500, "A-SIMILAR")]
+            ),
         }
     )
     result = queries.search_product_ids_by_sku(bp, ["A"])
@@ -102,20 +84,27 @@ def test_search_product_ids_requires_exact_sku_match() -> None:
 def test_search_product_ids_deduplicates_input() -> None:
     bp = FakeBrightpearl(
         get_responses={
-            "/product-service/product-search?SKU=A": {
-                "metaData": {
-                    "columns": [
-                        {"name": "productId"},
-                        {"name": "SKU"},
-                    ]
-                },
-                "results": [[500, "A"]],
-            },
+            "/product-service/product-search?SKU=A": _search_response_for(
+                [(500, "A")]
+            ),
         }
     )
     queries.search_product_ids_by_sku(bp, ["A", "A", "A"])
     calls = [c for c in bp.get_calls if c[0] == "/product-service/product-search"]
     assert len(calls) == 1
+
+
+def test_search_product_ids_batches_big_lists_into_pipe_separated_calls() -> None:
+    bp = FakeBrightpearl()
+    skus = [f"SKU{i}" for i in range(queries.PRODUCT_SEARCH_SKU_BATCH_SIZE + 5)]
+    queries.search_product_ids_by_sku(bp, skus)
+    # Expect two calls: one with 50 pipe-joined SKUs, one with 5.
+    search_calls = [c for c in bp.get_calls if c[0] == "/product-service/product-search"]
+    assert len(search_calls) == 2
+    first_filter = search_calls[0][1]["SKU"]
+    assert first_filter.count("|") == queries.PRODUCT_SEARCH_SKU_BATCH_SIZE - 1
+    second_filter = search_calls[1][1]["SKU"]
+    assert second_filter.count("|") == 4
 
 
 # ---------------------------------------------------------------------------

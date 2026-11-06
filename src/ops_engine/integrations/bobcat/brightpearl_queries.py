@@ -38,47 +38,66 @@ _MULTI_ID_BATCH_SIZE = 50
 DEFAULT_CORRECTION_REASON = 1
 
 
+# Number of SKUs to pack into one product-search call. Brightpearl's
+# product-search supports pipe-separated OR values on a column filter.
+# Too many at once overflows the URL; too few burns requests (and gets
+# us rate-limited). 50 is a safe middle ground.
+PRODUCT_SEARCH_SKU_BATCH_SIZE = 50
+
+
 def search_product_ids_by_sku(
     bp: BrightpearlClient, skus: Iterable[str]
 ) -> dict[str, int]:
     """Resolve each SKU to its Brightpearl product ID.
 
-    Uses ``GET /product-service/product-search?SKU=...``. The search is
-    exact-match on SKU and (per Brightpearl docs) returns a
-    ``{"metaData": ..., "results": [...]}`` table where column metadata
-    tells us which column holds the product ID and which holds the SKU.
-    We tolerate the alternative plain-list shape some endpoints use.
+    Uses ``GET /product-service/product-search?SKU=A|B|C``. Brightpearl's
+    product-search accepts a pipe-separated OR filter on any column, so
+    a few GETs resolve a whole day's feed instead of hundreds.
+
+    The response is ``{"metaData": ..., "results": [...]}`` where
+    ``metaData.columns`` tells us which columns are returned. We extract
+    the ``productId`` / ``SKU`` pair per row.
 
     SKUs not found in Brightpearl are simply absent from the returned
     dict; the caller decides what to do (currently: log + skip).
     """
     unique = _dedupe_preserve_order(skus)
     found: dict[str, int] = {}
-    for sku in unique:
-        product_id = _search_one_sku(bp, sku)
-        if product_id is not None:
-            found[sku] = product_id
+    for offset in range(0, len(unique), PRODUCT_SEARCH_SKU_BATCH_SIZE):
+        batch = unique[offset : offset + PRODUCT_SEARCH_SKU_BATCH_SIZE]
+        found.update(_search_sku_batch(bp, batch))
     return found
 
 
-def _search_one_sku(bp: BrightpearlClient, sku: str) -> int | None:
+def _search_sku_batch(
+    bp: BrightpearlClient, skus: list[str]
+) -> dict[str, int]:
+    if not skus:
+        return {}
+    # Brightpearl expects pipe-separated OR values on a single filter.
+    sku_filter = "|".join(skus)
     response = bp.get(
         "/product-service/product-search",
-        params={"SKU": sku},
+        params={"SKU": sku_filter, "pageSize": len(skus)},
     )
     rows = _result_rows(response)
     columns = _result_columns(response)
+    sku_set = set(skus)
+    found: dict[str, int] = {}
     for row in rows:
         row_map = _row_to_map(row, columns)
-        row_sku = _first(row_map, ("SKU", "sku"))
-        if row_sku is None or str(row_sku).strip() != sku:
+        row_sku_raw = _first(row_map, ("SKU", "sku"))
+        if row_sku_raw is None:
+            continue
+        row_sku = str(row_sku_raw).strip()
+        if row_sku not in sku_set:
             continue
         pid = _first(row_map, ("productId", "productID", "id"))
         try:
-            return _as_int(pid)
+            found[row_sku] = _as_int(pid)
         except ValueError:
             continue
-    return None
+    return found
 
 
 def get_warehouse_stock_levels(

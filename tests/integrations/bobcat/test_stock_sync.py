@@ -92,15 +92,18 @@ class FakeBrightpearl:
     def get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         self.get_calls.append((path, dict(params) if params else None))
         if path == "/product-service/product-search" and params and "SKU" in params:
-            sku = params["SKU"]
-            pid = self.sku_to_pid.get(sku)
-            if pid is None:
-                return {"metaData": {"columns": []}, "results": []}
+            # The SKU filter is now a pipe-separated OR of many SKUs.
+            requested = params["SKU"].split("|")
+            rows = [
+                [self.sku_to_pid[s], s]
+                for s in requested
+                if s in self.sku_to_pid
+            ]
             return {
                 "metaData": {
                     "columns": [{"name": "productId"}, {"name": "SKU"}]
                 },
-                "results": [[pid, sku]],
+                "results": rows,
             }
         if path.startswith("/warehouse-service/product-availability/"):
             ids_part = path.rsplit("/", 1)[-1]
