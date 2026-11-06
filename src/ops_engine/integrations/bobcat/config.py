@@ -25,9 +25,20 @@ class BobcatConfig:
     # Virtual warehouse named "Bobcat" on the WBYS production account.
     warehouse_id: int
 
+    # Brightpearl location ID inside the warehouse. Stock corrections have
+    # to target a specific location (shelf/bin). A simple warehouse has
+    # one default location; look it up once via
+    # ``dump-path /warehouse-service/warehouse/{wh}/location`` and pin
+    # here.
+    location_id: int
+
     # Stock level applied when the feed says "Yes" against +10 Available.
     # Bobcat guarantee at least ten units are on hand when they flag Yes.
     in_stock_quantity: int
+
+    # Currency code for the cost value Brightpearl requires on each
+    # correction. WBYS trade in GBP.
+    currency_code: str
 
     # SFTP folder Bobcat (via WBYS) drop the daily CSV into.
     stock_remote_path: str
@@ -67,6 +78,7 @@ class BobcatConfig:
             return value
 
         warehouse_id = _required_int("WAREHOUSE_ID")
+        location_id = _required_int("LOCATION_ID")
         stock_path = _required_str("STOCK_PATH")
 
         in_stock_raw = env.get(f"{_ENV_PREFIX}_IN_STOCK_QUANTITY") or "10"
@@ -77,6 +89,8 @@ class BobcatConfig:
                 f"Invalid integer for {_ENV_PREFIX}_IN_STOCK_QUANTITY: "
                 f"{in_stock_raw!r}"
             ) from exc
+
+        currency_code = env.get(f"{_ENV_PREFIX}_CURRENCY_CODE") or "GBP"
 
         if missing:
             raise RuntimeError(
@@ -93,7 +107,9 @@ class BobcatConfig:
 
         return cls(
             warehouse_id=warehouse_id,
+            location_id=location_id,
             in_stock_quantity=in_stock_quantity,
+            currency_code=currency_code,
             stock_remote_path=stock_path,
             stock_processed_path=processed_path,
             file_name_prefix=file_prefix,
