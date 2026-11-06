@@ -46,30 +46,38 @@ def _search_response_for(rows: list[tuple[int, str]]) -> dict[str, Any]:
 def test_search_product_ids_returns_mapping() -> None:
     bp = FakeBrightpearl(
         get_responses={
-            "/product-service/product-search?SKU=A|B": _search_response_for(
-                [(500, "A"), (501, "B")]
+            "/product-service/product-search?SKU=A": _search_response_for(
+                [(500, "A")]
+            ),
+            "/product-service/product-search?SKU=B": _search_response_for(
+                [(501, "B")]
             ),
         }
     )
-    result = queries.search_product_ids_by_sku(bp, ["A", "B"])
+    result = queries.search_product_ids_by_sku(
+        bp, ["A", "B"], sleep=lambda _: None
+    )
     assert result == {"A": 500, "B": 501}
 
 
 def test_search_product_ids_skips_unknown() -> None:
     bp = FakeBrightpearl(
         get_responses={
-            "/product-service/product-search?SKU=A|B": _search_response_for(
+            "/product-service/product-search?SKU=A": _search_response_for(
                 [(500, "A")]
             ),
+            # Nothing for SKU=B
         }
     )
-    result = queries.search_product_ids_by_sku(bp, ["A", "B"])
+    result = queries.search_product_ids_by_sku(
+        bp, ["A", "B"], sleep=lambda _: None
+    )
     assert result == {"A": 500}
 
 
 def test_search_product_ids_requires_exact_sku_match() -> None:
-    # Brightpearl's OR filter can match a different SKU in the same row
-    # pattern; our wrapper filters results back to the SKUs we asked for.
+    # Brightpearl's SKU search is substring-ish; our wrapper filters to
+    # exact so a lookup for "A" doesn't accidentally resolve to "A-SIMILAR".
     bp = FakeBrightpearl(
         get_responses={
             "/product-service/product-search?SKU=A": _search_response_for(
@@ -77,7 +85,9 @@ def test_search_product_ids_requires_exact_sku_match() -> None:
             ),
         }
     )
-    result = queries.search_product_ids_by_sku(bp, ["A"])
+    result = queries.search_product_ids_by_sku(
+        bp, ["A"], sleep=lambda _: None
+    )
     assert result == {}
 
 
@@ -89,22 +99,33 @@ def test_search_product_ids_deduplicates_input() -> None:
             ),
         }
     )
-    queries.search_product_ids_by_sku(bp, ["A", "A", "A"])
+    queries.search_product_ids_by_sku(
+        bp, ["A", "A", "A"], sleep=lambda _: None
+    )
     calls = [c for c in bp.get_calls if c[0] == "/product-service/product-search"]
     assert len(calls) == 1
 
 
-def test_search_product_ids_batches_big_lists_into_pipe_separated_calls() -> None:
-    bp = FakeBrightpearl()
-    skus = [f"SKU{i}" for i in range(queries.PRODUCT_SEARCH_SKU_BATCH_SIZE + 5)]
-    queries.search_product_ids_by_sku(bp, skus)
-    # Expect two calls: one with 50 pipe-joined SKUs, one with 5.
-    search_calls = [c for c in bp.get_calls if c[0] == "/product-service/product-search"]
-    assert len(search_calls) == 2
-    first_filter = search_calls[0][1]["SKU"]
-    assert first_filter.count("|") == queries.PRODUCT_SEARCH_SKU_BATCH_SIZE - 1
-    second_filter = search_calls[1][1]["SKU"]
-    assert second_filter.count("|") == 4
+def test_search_product_ids_sleeps_between_calls() -> None:
+    bp = FakeBrightpearl(
+        get_responses={
+            "/product-service/product-search?SKU=A": _search_response_for(
+                [(500, "A")]
+            ),
+            "/product-service/product-search?SKU=B": _search_response_for(
+                [(501, "B")]
+            ),
+            "/product-service/product-search?SKU=C": _search_response_for(
+                [(502, "C")]
+            ),
+        }
+    )
+    sleeps: list[float] = []
+    queries.search_product_ids_by_sku(
+        bp, ["A", "B", "C"], sleep=sleeps.append, delay_seconds=0.5
+    )
+    # First call has no preceding sleep; next two do.
+    assert sleeps == [0.5, 0.5]
 
 
 # ---------------------------------------------------------------------------
