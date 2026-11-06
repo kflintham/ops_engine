@@ -21,8 +21,9 @@ first and POST the delta needed to reach the target.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from ops_engine.core.brightpearl import BrightpearlClient
 
@@ -38,66 +39,58 @@ _MULTI_ID_BATCH_SIZE = 50
 DEFAULT_CORRECTION_REASON = 1
 
 
-# Number of SKUs to pack into one product-search call. Brightpearl's
-# product-search supports pipe-separated OR values on a column filter,
-# but caps the whole query string at 512 characters (GWYC-037). Bobcat
-# SKUs are ~14 chars each, so 25 per batch keeps us safely under that.
-PRODUCT_SEARCH_SKU_BATCH_SIZE = 25
+# Delay between one-SKU-at-a-time product-search calls. Brightpearl
+# rate-limits roughly at 200 requests per minute across the account, so
+# ~0.35s / request keeps 188 SKUs under that even running flat out.
+# Tried batching the SKU filter with pipe-separated OR -- Brightpearl
+# treats "A|B|C" as a literal SKU rather than an OR search, so we have
+# to pay the per-SKU cost. If this ever becomes slow enough to matter,
+# move to a brand-level product fetch and build a local SKU map.
+PRODUCT_SEARCH_DELAY_SECONDS = 0.35
 
 
 def search_product_ids_by_sku(
-    bp: BrightpearlClient, skus: Iterable[str]
+    bp: BrightpearlClient,
+    skus: Iterable[str],
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    delay_seconds: float = PRODUCT_SEARCH_DELAY_SECONDS,
 ) -> dict[str, int]:
     """Resolve each SKU to its Brightpearl product ID.
 
-    Uses ``GET /product-service/product-search?SKU=A|B|C``. Brightpearl's
-    product-search accepts a pipe-separated OR filter on any column, so
-    a few GETs resolve a whole day's feed instead of hundreds.
-
-    The response is ``{"metaData": ..., "results": [...]}`` where
-    ``metaData.columns`` tells us which columns are returned. We extract
-    the ``productId`` / ``SKU`` pair per row.
-
-    SKUs not found in Brightpearl are simply absent from the returned
-    dict; the caller decides what to do (currently: log + skip).
+    One ``GET /product-service/product-search?SKU=...`` per SKU with a
+    short sleep between calls to stay under Brightpearl's rate limit.
+    The ``sleep`` and ``delay_seconds`` kwargs are for tests.
     """
     unique = _dedupe_preserve_order(skus)
     found: dict[str, int] = {}
-    for offset in range(0, len(unique), PRODUCT_SEARCH_SKU_BATCH_SIZE):
-        batch = unique[offset : offset + PRODUCT_SEARCH_SKU_BATCH_SIZE]
-        found.update(_search_sku_batch(bp, batch))
+    for index, sku in enumerate(unique):
+        if index > 0 and delay_seconds > 0:
+            sleep(delay_seconds)
+        product_id = _search_one_sku(bp, sku)
+        if product_id is not None:
+            found[sku] = product_id
     return found
 
 
-def _search_sku_batch(
-    bp: BrightpearlClient, skus: list[str]
-) -> dict[str, int]:
-    if not skus:
-        return {}
-    # Brightpearl expects pipe-separated OR values on a single filter.
-    sku_filter = "|".join(skus)
+def _search_one_sku(bp: BrightpearlClient, sku: str) -> int | None:
     response = bp.get(
         "/product-service/product-search",
-        params={"SKU": sku_filter, "pageSize": len(skus)},
+        params={"SKU": sku},
     )
     rows = _result_rows(response)
     columns = _result_columns(response)
-    sku_set = set(skus)
-    found: dict[str, int] = {}
     for row in rows:
         row_map = _row_to_map(row, columns)
-        row_sku_raw = _first(row_map, ("SKU", "sku"))
-        if row_sku_raw is None:
-            continue
-        row_sku = str(row_sku_raw).strip()
-        if row_sku not in sku_set:
+        row_sku = _first(row_map, ("SKU", "sku"))
+        if row_sku is None or str(row_sku).strip() != sku:
             continue
         pid = _first(row_map, ("productId", "productID", "id"))
         try:
-            found[row_sku] = _as_int(pid)
+            return _as_int(pid)
         except ValueError:
             continue
-    return found
+    return None
 
 
 def get_warehouse_stock_levels(
