@@ -123,6 +123,13 @@ def list_warehouse_product_ids(
     how we find the products we need to zero out when they fall off the
     Bobcat feed. Brightpearl returns either a mapping keyed by product ID
     or a list of ``{"productId": ..., ...}`` rows -- we accept both.
+
+    NOTE: Brightpearl's live API doesn't actually expose this exact path
+    on all accounts (the WBYS account returns 404 for it). The zero-out-
+    on-absence feature in :mod:`stock_sync` therefore catches any error
+    this function raises and falls back to only setting stock for SKUs
+    present in today's feed. Ongoing: find the correct endpoint
+    (likely a stock-search or report).
     """
     response = bp.get(f"/warehouse-service/warehouse/{warehouse_id}/stock")
     if response is None:
