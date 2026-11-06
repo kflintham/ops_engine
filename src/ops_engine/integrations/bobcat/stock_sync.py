@@ -131,11 +131,23 @@ def _apply(
             summary.skipped_unknown_sku.append(sku)
 
     # Zero out anything Brightpearl thinks is in the warehouse but that
-    # the feed didn't mention today.
+    # the feed didn't mention today. This step is best-effort: Brightpearl
+    # doesn't expose a clean "list warehouse contents" endpoint on every
+    # account, so if the lookup fails we log it and carry on without the
+    # zero-out. The feed SKUs still get their stock set correctly.
     feed_product_ids = set(sku_to_pid.values())
-    existing_in_warehouse = set(
-        queries.list_warehouse_product_ids(bp, warehouse_id=config.warehouse_id)
-    )
+    try:
+        existing_in_warehouse = set(
+            queries.list_warehouse_product_ids(
+                bp, warehouse_id=config.warehouse_id
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 -- best-effort warning
+        _LOGGER.warning(
+            "Could not list existing warehouse contents (zero-out skipped): %s",
+            exc,
+        )
+        existing_in_warehouse = set()
     to_zero_product_ids = existing_in_warehouse - feed_product_ids
 
     # Read current levels for the union so we can compute per-product

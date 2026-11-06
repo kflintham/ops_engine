@@ -306,3 +306,29 @@ def test_sync_ensures_processed_folder_exists(config: BobcatConfig) -> None:
     bp = FakeBrightpearl()
     run_stock_sync(bp, sftp, config, now=_now)
     assert config.stock_processed_path in sftp.ensured_dirs
+
+
+def test_sync_continues_when_warehouse_listing_fails(
+    config: BobcatConfig,
+) -> None:
+    # Brightpearl doesn't expose the "list warehouse contents" endpoint on
+    # every account. When that lookup raises, the sync should log a warning
+    # and still apply the feed SKUs rather than fail the whole run.
+    path = "/home/wbysltd/SupplierStockFeeds/Bobcat/BC_STOCK_20261103080000.csv"
+    sftp = FakeSftp({path: "\n".join([HEADER, _row("SKU-A", "Yes")])})
+    bp = FakeBrightpearl(sku_to_pid={"SKU-A": 500}, warehouse_stock={500: 0})
+
+    original_get = bp.get
+
+    def failing_get(p: str, *, params: Any = None) -> Any:
+        if p == f"/warehouse-service/warehouse/{WAREHOUSE_ID}/stock":
+            raise RuntimeError("404 Not Found")
+        return original_get(p, params=params)
+
+    bp.get = failing_get  # type: ignore[assignment]
+
+    summary = run_stock_sync(bp, sftp, config, now=_now)
+
+    assert summary.ok
+    assert len(summary.changed) == 1
+    assert summary.changed[0].sku == "SKU-A"
