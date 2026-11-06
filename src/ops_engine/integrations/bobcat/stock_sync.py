@@ -99,10 +99,27 @@ def run_stock_sync(
         _LOGGER.info("Parsed %d line(s) from %s", len(lines), filename)
 
         _apply(brightpearl, config, lines, summary)
-        _archive_file(sftp, config, filename, clock)
     except Exception as exc:  # noqa: BLE001 -- boundary catch
         _LOGGER.exception("Bobcat stock sync failed on %s", filename)
         summary.error = _error_message(exc)
+        return summary
+
+    # Only archive the file if the Brightpearl write actually succeeded.
+    # If every correction errored we want the file to stay put so the next
+    # run (or a human) can retry it.
+    if summary.changed or (
+        summary.updates and not summary.skipped_update_errors
+    ):
+        _archive_file(sftp, config, filename, clock)
+    else:
+        _LOGGER.warning(
+            "%s: not archiving -- no corrections succeeded "
+            "(%d changed, %d errors, %d unknown SKUs)",
+            filename,
+            len(summary.changed),
+            len(summary.skipped_update_errors),
+            len(summary.skipped_unknown_sku),
+        )
     return summary
 
 
@@ -163,70 +180,86 @@ def _apply(
         bp, all_product_ids, warehouse_id=config.warehouse_id
     )
 
-    # Feed lines first, in input order (preserves parser's "last wins").
+    # Build the list of corrections (and the matching StockUpdate records
+    # for the summary). We hand the whole list to the queries layer which
+    # splits it into batched POSTs -- one POST per SKU is both wasteful
+    # and quickly rate-limited by Brightpearl.
+    corrections: list[queries.StockCorrection] = []
+    pending_updates: list[StockUpdate] = []
+
     for sku, (target, price) in targets_by_sku.items():
         pid = sku_to_pid.get(sku)
         if pid is None:
             continue
-        current = current_levels.get(pid, 0)
-        _apply_one(
-            bp, config, sku=sku, product_id=pid,
-            previous=current, target=target, price=price, summary=summary,
+        previous = current_levels.get(pid, 0)
+        update = StockUpdate(
+            sku=sku,
+            product_id=pid,
+            previous_quantity=previous,
+            new_quantity=target,
         )
-
-    # Zero-out products absent from today's feed.
-    for pid in sorted(to_zero_product_ids):
-        current = current_levels.get(pid, 0)
-        if current == 0:
+        pending_updates.append(update)
+        if update.delta == 0:
             continue
-        _apply_one(
-            bp, config, sku=f"<pid:{pid}>", product_id=pid,
-            previous=current, target=0, price=None, summary=summary,
+        corrections.append(
+            queries.StockCorrection(
+                product_id=pid,
+                location_id=config.location_id,
+                quantity_delta=update.delta,
+                cost_value=_format_cost(price),
+                currency=config.currency_code,
+                note="Bobcat daily stock feed",
+            )
         )
 
+    for pid in sorted(to_zero_product_ids):
+        previous = current_levels.get(pid, 0)
+        if previous == 0:
+            continue
+        update = StockUpdate(
+            sku=f"<pid:{pid}>",
+            product_id=pid,
+            previous_quantity=previous,
+            new_quantity=0,
+        )
+        pending_updates.append(update)
+        corrections.append(
+            queries.StockCorrection(
+                product_id=pid,
+                location_id=config.location_id,
+                quantity_delta=update.delta,
+                cost_value=_format_cost(None),
+                currency=config.currency_code,
+                note="Bobcat daily stock feed (zero-out)",
+            )
+        )
 
-def _apply_one(
-    bp: BrightpearlClient,
-    config: BobcatConfig,
-    *,
-    sku: str,
-    product_id: int,
-    previous: int,
-    target: int,
-    price: Decimal | None,
-    summary: StockSyncSummary,
-) -> None:
-    delta = target - previous
-    update = StockUpdate(
-        sku=sku,
-        product_id=product_id,
-        previous_quantity=previous,
-        new_quantity=target,
-    )
-    if delta == 0:
-        summary.updates.append(update)
+    if not corrections:
+        _LOGGER.info("No stock changes to apply")
+        summary.updates.extend(pending_updates)
         return
+
     try:
-        queries.apply_stock_correction(
+        queries.apply_stock_corrections(
             bp,
             warehouse_id=config.warehouse_id,
-            location_id=config.location_id,
-            product_id=product_id,
-            quantity_delta=delta,
-            cost_value=_format_cost(price),
-            currency_code=config.currency_code,
-            note="Bobcat daily stock feed",
+            corrections=corrections,
         )
-        summary.updates.append(update)
-        _LOGGER.info(
-            "SKU %s (pid=%d) %d -> %d (delta %+d)",
-            sku, product_id, previous, target, delta,
-        )
-    except Exception as exc:  # noqa: BLE001 -- per-SKU boundary
-        _LOGGER.exception(
-            "Failed to apply correction for SKU %s (pid=%d)", sku, product_id
-        )
-        summary.skipped_update_errors.append((sku, _error_message(exc)))
+    except Exception as exc:  # noqa: BLE001 -- record and continue
+        _LOGGER.exception("Stock-correction batch failed")
+        err = _error_message(exc)
+        for update in pending_updates:
+            if update.delta != 0:
+                summary.skipped_update_errors.append((update.sku, err))
+        return
+
+    summary.updates.extend(pending_updates)
+    for u in pending_updates:
+        if u.delta != 0:
+            _LOGGER.info(
+                "SKU %s (pid=%d) %d -> %d (delta %+d)",
+                u.sku, u.product_id, u.previous_quantity, u.new_quantity, u.delta,
+            )
 
 
 # ---------------------------------------------------------------------------
