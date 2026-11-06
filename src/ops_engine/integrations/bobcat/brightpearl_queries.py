@@ -157,8 +157,11 @@ def apply_stock_correction(
     bp: BrightpearlClient,
     *,
     warehouse_id: int,
+    location_id: int,
     product_id: int,
     quantity_delta: int,
+    cost_value: str,
+    currency_code: str,
     reason_id: int = DEFAULT_CORRECTION_REASON,
     note: str = "",
 ) -> None:
@@ -168,12 +171,20 @@ def apply_stock_correction(
     with a body shaped like::
 
         {"corrections": [
-            {"quantity": <delta>, "productId": <pid>,
-             "reason": <reasonId>, "reference": "<note>"}
+            {
+                "quantity": <delta>,
+                "productId": <pid>,
+                "locationId": <locId>,
+                "cost": {"value": "<GBP cost>", "currencyCode": "GBP"},
+                "reason": <reasonId>,
+                "reference": "<note>"
+            }
         ]}
 
-    A positive delta adds stock, a negative delta removes it. Callers are
-    expected to compute the delta from (desired - current).
+    Brightpearl requires both a locationId (shelf/bin inside the
+    warehouse) and a per-unit cost value+currency on every correction, so
+    both are mandatory here. A positive delta adds stock, a negative
+    delta removes it.
     """
     if quantity_delta == 0:
         return
@@ -182,6 +193,11 @@ def apply_stock_correction(
             {
                 "quantity": quantity_delta,
                 "productId": product_id,
+                "locationId": location_id,
+                "cost": {
+                    "value": cost_value,
+                    "currencyCode": currency_code,
+                },
                 "reason": reason_id,
                 "reference": note,
             }

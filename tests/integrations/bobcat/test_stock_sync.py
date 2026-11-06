@@ -10,6 +10,7 @@ from ops_engine.integrations.bobcat.stock_sync import run_stock_sync
 
 
 WAREHOUSE_ID = 14
+LOCATION_ID = 27
 FIXED_NOW = datetime(2026, 11, 3, 8, 0, tzinfo=timezone.utc)
 
 
@@ -30,7 +31,9 @@ def _row(sku: str, availability: str) -> str:
 def config() -> BobcatConfig:
     return BobcatConfig(
         warehouse_id=WAREHOUSE_ID,
+        location_id=LOCATION_ID,
         in_stock_quantity=10,
+        currency_code="GBP",
         stock_remote_path="/home/wbysltd/SupplierStockFeeds/Bobcat/",
         stock_processed_path="/home/wbysltd/SupplierStockFeeds/Bobcat/processed/",
         file_name_prefix="BC_STOCK_",
@@ -162,6 +165,8 @@ def test_sync_updates_stock_for_in_stock_sku(config: BobcatConfig) -> None:
         {
             "quantity": 10,
             "productId": 500,
+            "locationId": LOCATION_ID,
+            "cost": {"value": "54.79", "currencyCode": "GBP"},
             "reason": 1,
             "reference": "Bobcat daily stock feed",
         }

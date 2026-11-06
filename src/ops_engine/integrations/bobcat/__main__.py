@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 
 from ops_engine.core.brightpearl import BrightpearlClient, BrightpearlConfig
@@ -77,6 +78,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p_dump.add_argument("path", help="Brightpearl path, e.g. /warehouse-service/warehouse/14/stock")
     p_dump.set_defaults(func=_cmd_dump_path)
 
+    p_locations = sub.add_parser(
+        "list-locations",
+        help="List the location IDs inside the Bobcat warehouse (for .env.local)",
+    )
+    p_locations.set_defaults(func=_cmd_list_locations)
+
     p_sync = sub.add_parser(
         "sync",
         help="Apply the latest Bobcat stock CSV to Brightpearl",
@@ -121,6 +128,32 @@ def _cmd_dump_path(args: argparse.Namespace) -> int:
         sys.stdout.write(json.dumps(response, indent=2, default=str))
     except Exception as exc:  # noqa: BLE001 -- diagnostics tool
         sys.stdout.write(f"ERROR: {type(exc).__name__}: {exc}")
+    sys.stdout.write("\n")
+    return 0
+
+
+def _cmd_list_locations(_args: argparse.Namespace) -> int:
+    """Print the locations inside the Bobcat warehouse.
+
+    Stock corrections target a specific location (shelf/bin) inside a
+    warehouse. A simple Virtual warehouse usually has one default
+    location; its ID is what BOBCAT_LOCATION_ID in .env.local should be
+    set to.
+    """
+    bp_cfg = BrightpearlConfig.from_env()
+    warehouse_id_raw = os.environ.get("BOBCAT_WAREHOUSE_ID")
+    if not warehouse_id_raw:
+        sys.stderr.write("BOBCAT_WAREHOUSE_ID is not set\n")
+        return 2
+    path = f"/warehouse-service/warehouse/{warehouse_id_raw}/location"
+    bp = BrightpearlClient(bp_cfg)
+    sys.stdout.write(f"\n=== GET {path} ===\n")
+    try:
+        response = bp.get(path)
+    except Exception as exc:  # noqa: BLE001 -- diagnostics tool
+        sys.stderr.write(f"ERROR: {type(exc).__name__}: {exc}\n")
+        return 1
+    sys.stdout.write(json.dumps(response, indent=2, default=str))
     sys.stdout.write("\n")
     return 0
 

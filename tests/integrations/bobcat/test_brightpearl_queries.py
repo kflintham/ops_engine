@@ -236,7 +236,14 @@ def test_list_warehouse_product_ids_handles_empty() -> None:
 def test_apply_stock_correction_posts_positive_delta() -> None:
     bp = FakeBrightpearl()
     queries.apply_stock_correction(
-        bp, warehouse_id=14, product_id=500, quantity_delta=10, note="test"
+        bp,
+        warehouse_id=14,
+        location_id=27,
+        product_id=500,
+        quantity_delta=10,
+        cost_value="54.79",
+        currency_code="GBP",
+        note="test",
     )
     assert bp.post_calls == [
         (
@@ -246,6 +253,8 @@ def test_apply_stock_correction_posts_positive_delta() -> None:
                     {
                         "quantity": 10,
                         "productId": 500,
+                        "locationId": 27,
+                        "cost": {"value": "54.79", "currencyCode": "GBP"},
                         "reason": queries.DEFAULT_CORRECTION_REASON,
                         "reference": "test",
                     }
@@ -258,7 +267,13 @@ def test_apply_stock_correction_posts_positive_delta() -> None:
 def test_apply_stock_correction_posts_negative_delta() -> None:
     bp = FakeBrightpearl()
     queries.apply_stock_correction(
-        bp, warehouse_id=14, product_id=500, quantity_delta=-7
+        bp,
+        warehouse_id=14,
+        location_id=27,
+        product_id=500,
+        quantity_delta=-7,
+        cost_value="54.79",
+        currency_code="GBP",
     )
     assert bp.post_calls[0][1]["corrections"][0]["quantity"] == -7
 
@@ -266,6 +281,12 @@ def test_apply_stock_correction_posts_negative_delta() -> None:
 def test_apply_stock_correction_zero_delta_is_noop() -> None:
     bp = FakeBrightpearl()
     queries.apply_stock_correction(
-        bp, warehouse_id=14, product_id=500, quantity_delta=0
+        bp,
+        warehouse_id=14,
+        location_id=27,
+        product_id=500,
+        quantity_delta=0,
+        cost_value="54.79",
+        currency_code="GBP",
     )
     assert bp.post_calls == []

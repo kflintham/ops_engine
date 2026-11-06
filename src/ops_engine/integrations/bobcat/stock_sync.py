@@ -26,6 +26,8 @@ from typing import Callable
 from ops_engine.core.brightpearl import BrightpearlClient
 from ops_engine.core.sftp import SftpClient
 
+from decimal import Decimal
+
 from . import brightpearl_queries as queries
 from .config import BobcatConfig
 from .stock_parser import BobcatStockLine, parse_stock_csv
@@ -115,9 +117,12 @@ def _apply(
     lines: list[BobcatStockLine],
     summary: StockSyncSummary,
 ) -> None:
-    # SKU -> target quantity we want in the warehouse after this run.
-    targets_by_sku: dict[str, int] = {
-        line.sku: (config.in_stock_quantity if line.in_stock else 0)
+    # SKU -> (target quantity, purchase_price) for every feed row.
+    targets_by_sku: dict[str, tuple[int, Decimal | None]] = {
+        line.sku: (
+            config.in_stock_quantity if line.in_stock else 0,
+            line.purchase_price,
+        )
         for line in lines
     }
 
@@ -159,14 +164,14 @@ def _apply(
     )
 
     # Feed lines first, in input order (preserves parser's "last wins").
-    for sku, target in targets_by_sku.items():
+    for sku, (target, price) in targets_by_sku.items():
         pid = sku_to_pid.get(sku)
         if pid is None:
             continue
         current = current_levels.get(pid, 0)
         _apply_one(
             bp, config, sku=sku, product_id=pid,
-            previous=current, target=target, summary=summary,
+            previous=current, target=target, price=price, summary=summary,
         )
 
     # Zero-out products absent from today's feed.
@@ -176,7 +181,7 @@ def _apply(
             continue
         _apply_one(
             bp, config, sku=f"<pid:{pid}>", product_id=pid,
-            previous=current, target=0, summary=summary,
+            previous=current, target=0, price=None, summary=summary,
         )
 
 
@@ -188,6 +193,7 @@ def _apply_one(
     product_id: int,
     previous: int,
     target: int,
+    price: Decimal | None,
     summary: StockSyncSummary,
 ) -> None:
     delta = target - previous
@@ -204,8 +210,11 @@ def _apply_one(
         queries.apply_stock_correction(
             bp,
             warehouse_id=config.warehouse_id,
+            location_id=config.location_id,
             product_id=product_id,
             quantity_delta=delta,
+            cost_value=_format_cost(price),
+            currency_code=config.currency_code,
             note="Bobcat daily stock feed",
         )
         summary.updates.append(update)
@@ -262,6 +271,19 @@ def _join(folder: str, filename: str) -> str:
     if folder.endswith("/"):
         return folder + filename
     return folder + "/" + filename
+
+
+def _format_cost(price: Decimal | None) -> str:
+    """Render the per-unit cost as the string Brightpearl expects.
+
+    Brightpearl's stock-correction endpoint demands a cost even when the
+    correction is a reduction. Missing / unparseable prices in the feed
+    fall back to "0.00" so the correction still goes through; cost
+    accuracy is handled by a separate cost sync (not built yet).
+    """
+    if price is None:
+        return "0.00"
+    return f"{price:.2f}"
 
 
 def _default_clock() -> datetime:
