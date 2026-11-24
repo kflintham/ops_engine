@@ -121,15 +121,27 @@ def test_quantity_accepts_float_whole_number() -> None:
     assert line.quantity == 35
 
 
-def test_rejects_fractional_quantity() -> None:
+def test_fractional_quantity_floors(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Titan's real feed occasionally has fractional quantities (data-
+    # entry quirks). We floor to the next whole unit so we never
+    # oversell, and log the original value.
     data = _xlsx_bytes(
         [
             HEADER,
-            ("TC01-03", "Quest", 35.5),
+            ("TC01-03", "Quest", 9.05),
+            ("TC01-04", "Quest size 04", 9.95),
         ]
     )
-    with pytest.raises(TitanStockError, match="not whole"):
-        parse_stock_xlsx(data)
+    with caplog.at_level("WARNING"):
+        lines = parse_stock_xlsx(data)
+    by_sku = {line.sku: line for line in lines}
+    assert by_sku["TC01-3"].quantity == 9
+    assert by_sku["TC01-4"].quantity == 9  # 9.95 floors to 9, not 10
+    assert any(
+        "fractional quantity 9.05" in record.message for record in caplog.records
+    )
 
 
 def test_negative_quantity_clamps_to_zero(
@@ -163,7 +175,7 @@ def test_rejects_non_numeric_quantity() -> None:
             ("TC01-03", "Quest", "lots"),
         ]
     )
-    with pytest.raises(TitanStockError, match="not an integer"):
+    with pytest.raises(TitanStockError, match="not a number"):
         parse_stock_xlsx(data)
 
 

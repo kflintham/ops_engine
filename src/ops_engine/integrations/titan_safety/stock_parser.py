@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -176,15 +177,20 @@ def _cell(row: tuple, column_index: int | None) -> object | None:
 def _parse_quantity(value: object, sku: str, row_number: int) -> int:
     """Return a non-negative integer stock quantity for the row.
 
-    Titan's feed carries occasional negative quantities (oversold /
-    committed-but-not-shipped stock). Those get clamped to 0 so a
-    whole-run abort doesn't block the rest of the SKUs; the log records
-    the original value so we can see it happened.
+    Titan's feed carries occasional negatives (oversold /
+    committed-but-not-shipped stock) and fractional values (data-entry
+    quirks, e.g. ``9.05``). We never want to oversell, so:
+
+    - Negatives clamp to 0.
+    - Fractionals floor (``9.05`` -> ``9``, ``9.95`` -> ``9``).
+
+    Both cases log a warning so we can see the original value in the
+    cron logs rather than losing it silently.
     """
     raw = _coerce_quantity(value, sku, row_number)
     if raw < 0:
         _LOGGER.warning(
-            "Row %d (SKU %s): negative quantity %d clamped to 0",
+            "Row %d (SKU %s): negative quantity %s clamped to 0",
             row_number, sku, raw,
         )
         return 0
@@ -199,11 +205,7 @@ def _coerce_quantity(value: object, sku: str, row_number: int) -> int:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
-        if not value.is_integer():
-            raise TitanStockError(
-                f"Row {row_number} (SKU {sku}): quantity {value} is not whole"
-            )
-        return int(value)
+        return _floor_fraction(value, sku, row_number)
     if isinstance(value, str):
         stripped = value.strip()
         try:
@@ -215,15 +217,21 @@ def _coerce_quantity(value: object, sku: str, row_number: int) -> int:
         except ValueError as exc:
             raise TitanStockError(
                 f"Row {row_number} (SKU {sku}): quantity {value!r} "
-                "is not an integer"
+                "is not a number"
             ) from exc
-        if not qty_f.is_integer():
-            raise TitanStockError(
-                f"Row {row_number} (SKU {sku}): quantity {value!r} "
-                "is not an integer"
-            )
-        return int(qty_f)
+        return _floor_fraction(qty_f, sku, row_number)
     raise TitanStockError(
         f"Row {row_number} (SKU {sku}): unexpected quantity type "
         f"{type(value).__name__}"
     )
+
+
+def _floor_fraction(value: float, sku: str, row_number: int) -> int:
+    if value.is_integer():
+        return int(value)
+    floored = math.floor(value)
+    _LOGGER.warning(
+        "Row %d (SKU %s): fractional quantity %s floored to %d",
+        row_number, sku, value, floored,
+    )
+    return floored
