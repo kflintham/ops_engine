@@ -132,15 +132,28 @@ def test_rejects_fractional_quantity() -> None:
         parse_stock_xlsx(data)
 
 
-def test_rejects_negative_quantity() -> None:
+def test_negative_quantity_clamps_to_zero(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Titan's real feed carries occasional negative quantities
+    # (oversold / committed-but-unshipped stock). We clamp to 0 so a
+    # whole run doesn't fail on them.
     data = _xlsx_bytes(
         [
             HEADER,
-            ("TC01-03", "Quest", -1),
+            ("TC01-03", "Quest", -4),
+            ("TC01-10", "Quest size 10", 15),
         ]
     )
-    with pytest.raises(TitanStockError, match="negative"):
-        parse_stock_xlsx(data)
+    with caplog.at_level("WARNING"):
+        lines = parse_stock_xlsx(data)
+    by_sku = {line.sku: line for line in lines}
+    assert by_sku["TC01-3"].quantity == 0
+    assert by_sku["TC01-10"].quantity == 15
+    # The original value is logged so we can see it happened.
+    assert any(
+        "negative quantity -4" in record.message for record in caplog.records
+    )
 
 
 def test_rejects_non_numeric_quantity() -> None:
