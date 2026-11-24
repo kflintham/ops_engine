@@ -23,10 +23,14 @@ doesn't touch IMAP, SFTP, or Brightpearl.
 from __future__ import annotations
 
 import io
+import logging
 from dataclasses import dataclass
 from typing import Iterable
 
 from openpyxl import load_workbook
+
+
+_LOGGER = logging.getLogger("ops_engine.titan_safety.stock_parser")
 
 
 class TitanStockError(Exception):
@@ -170,49 +174,55 @@ def _cell(row: tuple, column_index: int | None) -> object | None:
 
 
 def _parse_quantity(value: object, sku: str, row_number: int) -> int:
+    """Return a non-negative integer stock quantity for the row.
+
+    Titan's feed carries occasional negative quantities (oversold /
+    committed-but-not-shipped stock). Those get clamped to 0 so a
+    whole-run abort doesn't block the rest of the SKUs; the log records
+    the original value so we can see it happened.
+    """
+    raw = _coerce_quantity(value, sku, row_number)
+    if raw < 0:
+        _LOGGER.warning(
+            "Row %d (SKU %s): negative quantity %d clamped to 0",
+            row_number, sku, raw,
+        )
+        return 0
+    return raw
+
+
+def _coerce_quantity(value: object, sku: str, row_number: int) -> int:
     if isinstance(value, bool):
         raise TitanStockError(
             f"Row {row_number} (SKU {sku}): quantity is a boolean, expected int"
         )
     if isinstance(value, int):
-        if value < 0:
-            raise TitanStockError(
-                f"Row {row_number} (SKU {sku}): quantity {value} is negative"
-            )
         return value
     if isinstance(value, float):
         if not value.is_integer():
             raise TitanStockError(
                 f"Row {row_number} (SKU {sku}): quantity {value} is not whole"
             )
-        if value < 0:
-            raise TitanStockError(
-                f"Row {row_number} (SKU {sku}): quantity {value} is negative"
-            )
         return int(value)
     if isinstance(value, str):
         stripped = value.strip()
         try:
-            qty = int(stripped)
+            return int(stripped)
         except ValueError:
-            try:
-                qty_f = float(stripped)
-            except ValueError as exc:
-                raise TitanStockError(
-                    f"Row {row_number} (SKU {sku}): quantity {value!r} "
-                    "is not an integer"
-                ) from exc
-            if not qty_f.is_integer():
-                raise TitanStockError(
-                    f"Row {row_number} (SKU {sku}): quantity {value!r} "
-                    "is not an integer"
-                )
-            qty = int(qty_f)
-        if qty < 0:
+            pass
+        try:
+            qty_f = float(stripped)
+        except ValueError as exc:
             raise TitanStockError(
-                f"Row {row_number} (SKU {sku}): quantity {qty} is negative"
+                f"Row {row_number} (SKU {sku}): quantity {value!r} "
+                "is not an integer"
+            ) from exc
+        if not qty_f.is_integer():
+            raise TitanStockError(
+                f"Row {row_number} (SKU {sku}): quantity {value!r} "
+                "is not an integer"
             )
-        return qty
+        return int(qty_f)
     raise TitanStockError(
         f"Row {row_number} (SKU {sku}): unexpected quantity type "
         f"{type(value).__name__}"
