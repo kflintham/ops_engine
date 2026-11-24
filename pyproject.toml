@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "requests>=2.31",
     "paramiko>=3.4",
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]
